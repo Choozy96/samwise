@@ -1,0 +1,25 @@
+{{define "audit"}}{{template "header" .}}
+<h1>Audit log</h1>
+<p class="muted">A record of activity on your account — logins, messages, skill &amp; tool invocations, and scheduled jobs. The debugging lifeline when something looks off.</p>
+<div class="panel">
+  {{if .Entries}}
+  <table>
+    <thead><tr><th>Time</th><th>Event</th><th>Action</th><th>Detail</th><th>Status</th><th>Run</th></tr></thead>
+    <tbody>
+    {{range .Entries}}
+      <tr>
+        <td class="muted">{{.TS}}</td>
+        <td><span class="pill">{{.EventType}}</span></td>
+        <td><code>{{.ToolName}}</code></td>
+        <td>{{.ArgsSummary}}</td>
+        <td>{{if eq .ResultStatus "ok"}}<span class="pill">ok</span>{{else}}<span class="pill" style="color:var(--accent); border-color:var(--accent)">{{.ResultStatus}}</span>{{end}}</td>
+        <td class="muted">{{if .RunID}}#{{.RunID}}{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No activity recorded yet.</p>
+  {{end}}
+</div>
+{{template "footer" .}}{{end}}

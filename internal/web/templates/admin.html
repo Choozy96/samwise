@@ -1,0 +1,57 @@
+{{define "admin"}}{{template "header" .}}
+<h1>Admin</h1>
+
+<div class="panel">
+  <h2>Users</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+    {{range .Users}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.Username}}</td>
+        <td>{{if .IsAdmin}}<span class="pill">admin</span>{{else}}user{{end}}</td>
+        <td>{{if .Disabled}}<span class="pill">disabled</span>{{else}}<span class="pill">active</span>{{end}}</td>
+        <td class="muted">{{.CreatedAt}}</td>
+        <td>
+          {{if not .IsAdmin}}
+          <form method="post" action="/admin/users/toggle" style="display:inline">
+            <input type="hidden" name="user_id" value="{{.ID}}">
+            <input type="hidden" name="disabled" value="{{if .Disabled}}0{{else}}1{{end}}">
+            <button class="secondary">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+          </form>
+          <form method="post" action="/admin/users/password" style="display:inline-flex; gap:.3rem; align-items:center;" onsubmit="return confirm('Reset this user\'s password?')">
+            <input type="hidden" name="user_id" value="{{.ID}}">
+            <input type="password" name="password" placeholder="new password" minlength="8" autocomplete="new-password" required style="width:11rem;">
+            <button class="secondary">Reset password</button>
+          </form>
+          {{end}}
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Create user</h2>
+  <form method="post" action="/admin/users/create">
+    <div class="row">
+      <div><label for="newuser">Username</label><input id="newuser" name="username" required></div>
+      <div><label for="newpass">Password</label><input id="newpass" name="password" type="password" required></div>
+    </div>
+    <div style="margin-top:.75rem"><button type="submit">Create user</button></div>
+  </form>
+  <p class="muted" style="margin-top:.5rem">New accounts are standard users. Admins cannot read other users' memory or chats (spec §9).</p>
+</div>
+
+<div class="panel">
+  <h2>System health</h2>
+  <table>
+    <tr><th>Database</th><td>{{.Health.DB}}</td></tr>
+    <tr><th>DB path</th><td><code>{{.Health.DBPath}}</code></td></tr>
+    <tr><th>Users</th><td>{{.Health.UserCount}}</td></tr>
+    <tr><th>Version</th><td>{{.Health.Version}}</td></tr>
+  </table>
+</div>
+{{template "footer" .}}{{end}}

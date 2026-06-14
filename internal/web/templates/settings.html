@@ -1,0 +1,139 @@
+{{define "settings"}}{{template "header" .}}
+<h1>Settings</h1>
+
+<style>
+  .tabbar { display:flex; gap:.25rem; border-bottom:1px solid var(--border); margin:.5rem 0 1rem; flex-wrap:wrap; }
+  .tabbar button { background:none; border:none; border-bottom:2px solid transparent; border-radius:0; padding:.5rem .9rem; font-weight:600; color:var(--muted); cursor:pointer; }
+  .tabbar button.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tabpanel[hidden] { display:none; }
+  .field { max-width:420px; margin-bottom:.85rem; }
+  .field label { display:block; margin-bottom:.2rem; }
+  .field input, .field select { width:100%; }
+</style>
+
+<div class="tabbar" role="tablist">
+  <button type="button" data-tab="general" class="active">General</button>
+  <button type="button" data-tab="memory">Memory &amp; context</button>
+  <button type="button" data-tab="account">Account</button>
+</div>
+
+<form method="post" action="/settings" id="settingsForm">
+  <div class="tabpanel" data-panel="general">
+    <div class="panel">
+      <h2>Identity &amp; delivery</h2>
+      <div class="row">
+        <div>
+          <label for="timezone">Timezone (IANA)</label>
+          <input id="timezone" name="timezone" value="{{.S.Timezone}}" placeholder="Asia/Singapore">
+        </div>
+        <div>
+          <label for="delivery_channel">Delivery channel</label>
+          <select id="delivery_channel" name="delivery_channel">
+            <option value="web"{{if eq .S.DeliveryChannel "web"}} selected{{end}}>Web portal</option>
+            <option value="telegram"{{if eq .S.DeliveryChannel "telegram"}} selected{{end}}>Telegram</option>
+          </select>
+        </div>
+        <div>
+          <label for="tg_format">Telegram message format</label>
+          <select id="tg_format" name="tg_format">
+            <option value="markdown"{{if or (eq .S.TgFormat "markdown") (eq .S.TgFormat "telegram") (eq .S.TgFormat "")}} selected{{end}}>Markdown (renders bold/italic/code/links — recommended)</option>
+            <option value="html"{{if eq .S.TgFormat "html"}} selected{{end}}>HTML (same, using parse_mode=HTML)</option>
+            <option value="plain"{{if eq .S.TgFormat "plain"}} selected{{end}}>Plain (no formatting)</option>
+          </select>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:.5rem">How replies are formatted on <strong>Telegram</strong> (the web chat is unaffected). If Telegram rejects the markup, the message is resent as plain text so it always arrives. Scheduled output is delivered to your chosen <strong>delivery channel</strong>.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Access method &amp; model</h2>
+      <div class="row">
+        <div>
+          <label for="active_runtime">Access method</label>
+          <select id="active_runtime" name="active_runtime">
+            {{range .Runtimes}}
+            <option value="{{.ID}}"{{if eq $.S.ActiveRuntime .ID}} selected{{end}}{{if and (not .Available) (ne $.S.ActiveRuntime .ID)}} disabled{{end}}>{{.Label}}{{if not .Available}} (coming soon){{end}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div>
+          <label for="model">Model</label>
+          <select id="model" name="model">
+            {{range .ModelOptions}}
+            <option value="{{.Alias}}"{{if eq $.CurrentModel .ID}} selected{{end}}>{{.Label}}</option>
+            {{end}}
+          </select>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:.5rem">Switching takes effect on your next message — never mid-run. You can also use <code>/runtime</code> and <code>/model</code> in chat. Only Claude — SDK is wired today; channels and Codex are coming.</p>
+    </div>
+  </div>
+
+  <div class="tabpanel" data-panel="memory" hidden>
+    <div class="panel">
+      <h2>Memory &amp; distillation</h2>
+      <div class="field">
+        <label for="distillation_time">End-of-day distillation time (local)</label>
+        <input id="distillation_time" name="distillation_time" value="{{.S.DistillationTime}}" placeholder="23:30">
+      </div>
+      <label style="display:block; margin-bottom:.5rem"><input type="checkbox" name="distill_notify" value="1"{{if .S.DistillNotify}} checked{{end}}> Notify me with a message after the end-of-day distillation</label>
+      <p class="muted">Each day the assistant reads the day's conversation and saves a dated <strong>memory note</strong> (it also refreshes it every few hours). With notifications on, it sends you that note when the end-of-day pass runs, so you can see what it remembered. See the <a href="/guide">Guide</a> for how memory works.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Context assembly</h2>
+      <div class="row">
+        <div><label for="transcript_window_n">Transcript window (N messages)</label><input id="transcript_window_n" name="transcript_window_n" type="number" min="1" max="200" value="{{.S.TranscriptWindowN}}"></div>
+        <div><label for="retrieval_k">Memory retrieval (top K)</label><input id="retrieval_k" name="retrieval_k" type="number" min="0" max="50" value="{{.S.RetrievalK}}"></div>
+      </div>
+      <p class="muted" style="margin-top:.5rem">How much context each turn carries: the last <strong>N</strong> messages of this thread, plus the <strong>top K</strong> relevant memories retrieved by search (the last two days of notes are always loaded regardless of K).</p>
+    </div>
+  </div>
+
+  <button type="submit">Save settings</button>
+</form>
+
+<div class="tabpanel" data-panel="account" hidden>
+  <div class="panel">
+    <h2>Change password</h2>
+    <form method="post" action="/settings/password">
+      <div class="field">
+        <label for="current_password">Current password</label>
+        <input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="field">
+        <label for="new_password">New password <span class="muted">(min 8 characters)</span></label>
+        <input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div class="field">
+        <label for="confirm_password">Confirm new password</label>
+        <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <button type="submit">Change password</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>First-run setup</h2>
+    <p class="muted">Re-run the welcome wizard to refresh your memory, your agent's persona, and key preferences.</p>
+    <form method="post" action="/onboarding/reset"><button class="secondary" type="submit">Re-run setup</button></form>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var buttons = document.querySelectorAll('.tabbar button');
+    var panels = document.querySelectorAll('.tabpanel');
+    var form = document.getElementById('settingsForm');
+    function show(tab) {
+      buttons.forEach(function (b) { b.classList.toggle('active', b.dataset.tab === tab); });
+      panels.forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
+      // The shared Save button belongs to the General + Memory form only.
+      form.querySelector('button[type=submit]').style.display = (tab === 'account') ? 'none' : '';
+    }
+    buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.tab); }); });
+    if (location.hash === '#account') show('account');
+    else if (location.hash === '#memory') show('memory');
+  })();
+</script>
+{{template "footer" .}}{{end}}

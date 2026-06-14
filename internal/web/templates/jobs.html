@@ -1,0 +1,69 @@
+{{define "jobs"}}{{template "header" .}}
+<h1>Cron jobs</h1>
+<p class="muted">Recurring or one-shot scheduled jobs (cron). Times are interpreted in your timezone ({{.TZ}}) and follow you when you travel.</p>
+
+<div class="panel">
+  <h2>Create a job</h2>
+  <form method="post" action="/jobs/create">
+    <div class="row">
+      <div><label for="name">Name</label><input id="name" name="name" placeholder="Weekly review"></div>
+      <div>
+        <label for="type">Type</label>
+        <select id="type" name="type">
+          <option value="direct_message">direct_message (send text, no agent)</option>
+          <option value="agent_run">agent_run (run the assistant, deliver its reply)</option>
+        </select>
+      </div>
+    </div>
+    <label for="schedule_spec">Schedule</label>
+    <input id="schedule_spec" name="schedule_spec" placeholder="daily@07:00  ·  weekly@Mon 09:00  ·  once@2026-06-20T15:00" required>
+    <label for="body">Message / prompt</label>
+    <textarea id="body" name="body" rows="2" required placeholder="For agent_run: the prompt. For direct_message: the text to send."></textarea>
+    <div style="margin-top:.75rem"><button type="submit">Create job</button></div>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Your jobs</h2>
+  {{if .Jobs}}
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Schedule</th><th>Next fire</th><th>Detail</th><th></th></tr></thead>
+    <tbody>
+    {{range .Jobs}}
+      <tr>
+        <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">(unnamed)</span>{{end}}</td>
+        <td><span class="pill">{{.Type}}</span></td>
+        <td><code>{{.ScheduleSpec}}</code></td>
+        <td class="muted">{{if .Enabled}}{{.NextLocal}}{{else}}disabled{{end}}</td>
+        <td class="muted">{{.Summary}}</td>
+        <td>
+          {{if ne .Type "maintenance"}}
+          <details style="display:inline-block; vertical-align:top; margin-right:.4rem">
+            <summary class="secondary" style="cursor:pointer; display:inline-block">Edit</summary>
+            <form method="post" action="/jobs/update" style="margin-top:.5rem; min-width:260px">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <label>Name</label>
+              <input name="name" value="{{.Name}}">
+              <label style="margin-top:.4rem">Schedule</label>
+              <input name="schedule_spec" value="{{.ScheduleSpec}}" required>
+              <label style="margin-top:.4rem">{{if eq .Type "agent_run"}}Prompt{{else}}Message{{end}}</label>
+              <textarea name="body" rows="2" required>{{.Summary}}</textarea>
+              <label style="margin-top:.4rem"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Enabled</label>
+              <div style="margin-top:.5rem"><button type="submit">Save</button></div>
+            </form>
+          </details>
+          {{end}}
+          <form method="post" action="/jobs/delete" onsubmit="return confirm('Delete this job?')" style="display:inline">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button class="secondary">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No jobs yet. Reminders you set in chat also appear here.</p>
+  {{end}}
+</div>
+{{template "footer" .}}{{end}}

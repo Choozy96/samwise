@@ -1,0 +1,25 @@
+# Build artifacts
+/samwise
+/samwise.exe
+/bin/
+
+# Runtime data (SQLite DB, WAL, generated keys, backups)
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets — never commit
+.env
+*.key
+/secrets/
+
+# Per-run scratch (generated mcp-config, workspaces)
+/run/
+/workspaces/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

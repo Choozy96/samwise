@@ -1,0 +1,8 @@
+{{define "skillfile"}}{{template "header" .}}
+<p style="margin-bottom:.5rem"><a href="/extensions">← Back to Extensions</a></p>
+<h1 style="font-size:1.1rem"><code>{{.SkillName}}</code> / <code>{{.Path}}</code></h1>
+{{if .Note}}<p class="muted">{{.Note}}</p>{{end}}
+{{if .Content}}
+<pre style="overflow:auto; max-height:72vh; border:1px solid var(--border); border-radius:6px; padding:.75rem; white-space:pre; font-size:.85rem;">{{.Content}}</pre>
+{{end}}
+{{template "footer" .}}{{end}}

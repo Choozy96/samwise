@@ -1,0 +1,120 @@
+{{define "header"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Samwise</title>
+<script>
+  /* Apply the saved (or OS-preferred) theme before paint to avoid a flash. */
+  (function(){ try {
+    var t = localStorage.getItem('theme');
+    if (!t && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
+    if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  } catch(e){} })();
+</script>
+<style>
+  /* Samwise "Shire daylight" theme: warm parchment page, cream cards, leaf-green
+     brand/links, earthy text. */
+  :root {
+    --bg:#f1ead9; --panel:#fbf8f0; --border:#d8cdb4; --fg:#2c281f; --muted:#877f6c;
+    --accent:#4f7a3a; --accent-hover:#3d6029; --link:#2f6f4f; --link-hover:#214d36;
+    --subtle:#efe7d4; --input:#fffdf6; --danger:#b23a2e; --ok:#4f7a3a;
+    --flash-err-bg:#f7e8e3; --flash-err-fg:#8a2c1f; --flash-ok-bg:#e9f0dd; --flash-ok-fg:#335421;
+  }
+  /* Samwise "Shire night" theme: deep soil page, dark loam cards, soft leaf-green
+     accents on warm parchment text. */
+  :root[data-theme="dark"] {
+    --bg:#16140f; --panel:#211e17; --border:#3a352a; --fg:#e7e0cf; --muted:#9a907a;
+    --accent:#7faf5a; --accent-hover:#93c06d; --link:#a7cf86; --link-hover:#c5dfae;
+    --subtle:#2b2720; --input:#1a1813; --danger:#e08a7e; --ok:#8fc06a;
+    --flash-err-bg:#2a1a16; --flash-err-fg:#f0b3a8; --flash-ok-bg:#1c2614; --flash-ok-fg:#b6d595;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 -apple-system,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
+  a { color:var(--link); text-decoration:none; font-weight:500; }
+  a:hover { color:var(--link-hover); text-decoration:underline; }
+  header.nav { display:flex; gap:1rem; align-items:center; padding:.6rem 1.25rem; background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  header.nav .brand { font-weight:700; margin-right:.5rem; color:var(--accent); }
+  header.nav a { color:var(--fg); font-weight:600; font-size:.9rem; }
+  header.nav a:hover { color:var(--accent); text-decoration:none; }
+  header.nav .spacer { flex:1; }
+  header.nav .muted { color:var(--muted); font-size:.85rem; }
+  main { max-width:880px; margin:1.5rem auto; padding:0 1.25rem; }
+  h1 { font-size:1.4rem; margin:.2rem 0 1rem; }
+  h2 { font-size:1.1rem; margin:1.5rem 0 .5rem; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:1.25rem; margin-bottom:1.25rem; overflow-x:auto; }
+  label { display:block; margin:.6rem 0 .2rem; color:var(--muted); font-size:.85rem; }
+  input,select,textarea { width:100%; padding:.55rem .65rem; background:var(--input); color:var(--fg); border:1px solid var(--border); border-radius:6px; font:inherit; }
+  input:focus,select:focus,textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(79,122,58,.25); }
+  input[type=checkbox] { width:auto; }
+  button,.btn { display:inline-block; padding:.5rem 1.1rem; background:var(--accent); color:#fff; border:0; border-radius:999px; font:inherit; font-weight:700; cursor:pointer; }
+  button:hover,.btn:hover { background:var(--accent-hover); }
+  button.secondary { background:var(--panel); color:var(--link); border:1px solid var(--border); }
+  button.secondary:hover { background:var(--subtle); color:var(--link-hover); }
+  .row { display:flex; gap:1rem; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:180px; }
+  .flash { padding:.6rem .8rem; border-radius:6px; margin-bottom:1rem; }
+  .flash.error { background:var(--flash-err-bg); border:1px solid var(--danger); color:var(--flash-err-fg); }
+  .flash.ok { background:var(--flash-ok-bg); border:1px solid var(--ok); color:var(--flash-ok-fg); }
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:600; font-size:.85rem; }
+  .pill { font-size:.75rem; padding:.1rem .55rem; border-radius:999px; background:var(--subtle); border:1px solid var(--border); color:var(--muted); }
+  code { background:var(--subtle); border:1px solid var(--border); padding:.05rem .35rem; border-radius:4px; }
+  .markdown h1 { margin-top:0; }
+  .markdown h2 { border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+  .markdown h3 { font-size:1rem; }
+  .markdown p, .markdown li { line-height:1.6; }
+  .markdown ul, .markdown ol { padding-left:1.4rem; }
+  .markdown table { margin:.5rem 0 1rem; }
+  .markdown td, .markdown th { vertical-align:top; }
+  .markdown pre { background:var(--subtle); border:1px solid var(--border); border-radius:6px; padding:.75rem; overflow:auto; }
+  .markdown pre code { background:none; border:0; padding:0; }
+  .markdown blockquote { border-left:3px solid var(--border); margin:.5rem 0; padding:.2rem .9rem; color:var(--muted); }
+</style>
+</head>
+<body>
+{{if .User}}
+<header class="nav">
+  <span class="brand">🌿 Samwise</span>
+  <a href="/chat">Chat</a>
+  <a href="/agents">Agents</a>
+  <a href="/memory">Memory</a>
+  <a href="/extensions">Extensions</a>
+  <a href="/jobs">Cron jobs</a>
+  <a href="/audit">Audit</a>
+  <a href="/guide">Guide</a>
+  {{if .User.IsAdmin}}<a href="/admin">Admin</a>{{end}}
+  <a href="/settings">Settings</a>
+  <span class="spacer"></span>
+  <span class="muted">{{.User.Username}}{{if .User.IsAdmin}} · admin{{end}}</span>
+  <button type="button" class="secondary" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode" style="padding:.35rem .55rem; line-height:1;">🌙</button>
+  <form method="post" action="/logout" style="display:inline"><button class="secondary">Logout</button></form>
+</header>
+{{end}}
+<main>
+{{if .Flash}}<div class="flash {{.FlashKind}}">{{.Flash}}</div>{{end}}
+{{end}}
+
+{{define "footer"}}
+</main>
+<script>
+  (function(){
+    var btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    function dark(){ return document.documentElement.getAttribute('data-theme') === 'dark'; }
+    function paint(){ btn.textContent = dark() ? '☀️' : '🌙'; }
+    paint();
+    btn.addEventListener('click', function(){
+      var next = dark() ? 'light' : 'dark';
+      if (next === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+      else document.documentElement.removeAttribute('data-theme');
+      try { localStorage.setItem('theme', next); } catch(e){}
+      paint();
+    });
+  })();
+</script>
+</body>
+</html>
+{{end}}

@@ -1,0 +1,55 @@
+{{define "onboarding"}}{{template "header" .}}
+<h1>Welcome — let's set up your assistant</h1>
+<p class="muted">A minute of setup makes your assistant personal from the first message. Everything here is editable later (Memory, Agents, Settings). You can also skip.</p>
+
+<form method="post" action="/onboarding">
+  <div class="panel">
+    <h2>About you</h2>
+    <p class="muted">Seeded into memory so your assistant knows you.</p>
+    <label for="call_name">What should I call you?</label>
+    <input id="call_name" name="call_name" placeholder="e.g. Sam">
+    <label for="about">Tell me about yourself — work, interests, anything worth remembering</label>
+    <textarea id="about" name="about" rows="3" placeholder="e.g. Software engineer who loves Rust; based in Singapore; into climbing and coffee."></textarea>
+    <label for="style">How should I respond? Tone, length, format…</label>
+    <input id="style" name="style" placeholder="e.g. Concise and direct, use bullet points, no fluff.">
+  </div>
+
+  <div class="panel">
+    <h2>Your assistant</h2>
+    <p class="muted">Name your default agent and optionally give it a personality. (Create more agents anytime under Agents.)</p>
+    <div class="row">
+      <div><label for="agent_name">Assistant name</label><input id="agent_name" name="agent_name" value="{{if .Agent}}{{.Agent.Name}}{{else}}Assistant{{end}}"></div>
+    </div>
+    <label for="persona">Persona / how it should behave (optional)</label>
+    <textarea id="persona" name="persona" rows="3" placeholder="e.g. You are a sharp, no-nonsense chief of staff. Be proactive, flag risks, and keep me on track."></textarea>
+    <p class="muted" style="margin-top:.3rem">Leave blank to keep the standard assistant. Your operational rules (memory, reminders, timezone) are always kept.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Preferences</h2>
+    <div class="row">
+      <div>
+        <label for="timezone">Timezone (IANA)</label>
+        <input id="timezone" name="timezone" value="{{.S.Timezone}}" placeholder="Asia/Singapore">
+      </div>
+      <div>
+        <label for="delivery">Where should I reach you?</label>
+        <select id="delivery" name="delivery">
+          <option value="web"{{if eq .S.DeliveryChannel "web"}} selected{{end}}>Web portal</option>
+          <option value="telegram"{{if eq .S.DeliveryChannel "telegram"}} selected{{end}}>Telegram</option>
+        </select>
+      </div>
+    </div>
+    <label style="display:inline-flex; gap:.4rem; align-items:center; margin-top:.6rem;">
+      <input type="checkbox" name="briefing" value="1"> Set up a daily morning briefing (reminders + memory, at your briefing time)
+    </label>
+  </div>
+
+  <div style="display:flex; gap:.75rem; align-items:center;">
+    <button type="submit">Finish setup</button>
+    <span class="muted">or</span>
+    <button type="submit" form="skipform" class="secondary">Skip for now</button>
+  </div>
+</form>
+<form id="skipform" method="post" action="/onboarding/skip"></form>
+{{template "footer" .}}{{end}}

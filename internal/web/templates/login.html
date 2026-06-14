@@ -1,0 +1,21 @@
+{{define "login"}}{{template "header" .}}
+<div style="text-align:center; margin:1rem 0 .5rem">
+  <div style="font-size:1.6rem; font-weight:700; color:var(--accent)">🌿 Samwise</div>
+  <p class="muted" style="margin:.2rem 0 0">Your loyal personal assistant</p>
+</div>
+<h1>{{if .FirstRun}}Create the admin account{{else}}Sign in{{end}}</h1>
+<div class="panel" style="max-width:420px">
+  {{if .FirstRun}}<p class="muted">This is the first account, so it becomes the administrator.</p>{{end}}
+  <form method="post" action="{{if .FirstRun}}/setup{{else}}/login{{end}}">
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" autofocus required>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="{{if .FirstRun}}new-password{{else}}current-password{{end}}" required>
+    {{if .FirstRun}}
+    <label for="password2">Confirm password</label>
+    <input id="password2" name="password2" type="password" autocomplete="new-password" required>
+    {{end}}
+    <div style="margin-top:1rem"><button type="submit">{{if .FirstRun}}Create account{{else}}Sign in{{end}}</button></div>
+  </form>
+</div>
+{{template "footer" .}}{{end}}

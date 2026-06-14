@@ -1,0 +1,78 @@
+# Main orchestrator container (spec step 1 deliverable).
+#
+# SQLite is embedded in the orchestrator — there is NO separate database
+# container. Data durability comes from the named volume `app-data` mounted at
+# /data, which holds the SQLite file (and later, extensions/backups). Per-user
+# session containers are a later step (spec §8); this compose runs the single
+# main container only.
+
+services:
+  orchestrator:
+    # `image` is configurable so you can either build locally
+    # (`docker compose up --build`) or pull a pre-built image from a registry
+    # (set IMAGE=registry/samwise:tag, then `docker compose pull && up -d`).
+    # Building needs ~1GB+ RAM (the Go/sqlite compile) — too much for a micro
+    # VPS; build off-box and pull. See docs/DEPLOY.md.
+    image: ${IMAGE:-samwise:latest}
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-docker}
+    env_file:
+      - .env
+    environment:
+      # Override file defaults for the container regardless of .env contents.
+      DB_PATH: /data/app.db
+      HTTP_ADDR: ":8080"
+      APP_ENV: prod
+    # Plain HTTP. Do NOT expose this port to the internet directly — the portal
+    # has logins + personal data. On a VPS, either keep this bound to localhost
+    # and front it with the TLS proxy below, or restrict the firewall to your IP,
+    # or use Tailscale. See docs/DEPLOY.md.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - app-data:/data
+      # Harness auth (claude.ai login) for the claude-headless runtime: a
+      # dedicated dir holding .credentials.json, mounted into the app user's
+      # home so the in-container `claude` authenticates with the subscription.
+      # Mounted read-write so OAuth token refreshes persist. Populate it by
+      # copying your host's ~/.claude/.credentials.json into ./secrets/claude/
+      # (the secrets/ dir is gitignored).
+      - ${CLAUDE_CONFIG_DIR:-./secrets/claude}:/home/app/.claude
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  # ── Optional TLS reverse proxy ────────────────────────────────────────────
+  # Uncomment to serve the portal over HTTPS with an auto-provisioned cert.
+  # 1. Point a domain's A record at this VPS.
+  # 2. Create ./Caddyfile with:
+  #        your-domain.example {
+  #            reverse_proxy orchestrator:8080
+  #        }
+  # 3. Open the firewall for 80 + 443 (and keep 8080 closed to the internet).
+  # caddy:
+  #   image: caddy:2
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy-data:/data
+  #     - caddy-config:/config
+  #   networks:
+  #     - appnet
+
+# Single bridge network for now. Egress is unrestricted by default for
+# usability (agents fetch the web); restricting it later is a config change
+# here (spec §10.3), e.g. `internal: true` plus an egress proxy.
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  app-data:
+  # caddy-data:   # uncomment with the caddy service above
+  # caddy-config:

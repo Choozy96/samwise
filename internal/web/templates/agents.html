@@ -1,0 +1,168 @@
+{{define "agents"}}{{template "header" .}}
+<h1>Agents</h1>
+<p class="muted">Create different agents for different purposes. Each has its own <strong>soul</strong> (its identity &amp; behavior — the system prompt) and an optional model/runtime. Switch the active agent here, with <code>/agent</code> in chat, or on the chat page.</p>
+
+<div class="panel">
+  <h2>Your agents</h2>
+  {{range $ag := .Agents}}
+    <details style="border:1px solid var(--border); border-radius:6px; padding:.5rem .75rem; margin-bottom:.5rem;"{{if eq $ag.ID $.ActiveID}} open{{end}}>
+      <summary>
+        <strong>{{$ag.Name}}</strong> <span class="muted">— {{$ag.Description}}</span>
+        {{if $ag.IsDefault}}<span class="pill">default</span>{{end}}
+        {{if eq $ag.ID $.ActiveID}}<span class="pill" style="color:var(--accent); border-color:var(--accent)">active</span>{{end}}
+      </summary>
+
+      <div style="display:flex; gap:.5rem; margin:.6rem 0;">
+        {{if ne $ag.ID $.ActiveID}}
+        <form method="post" action="/agents/select"><input type="hidden" name="agent_id" value="{{$ag.ID}}"><button>Use this agent</button></form>
+        {{end}}
+        {{if not $ag.IsDefault}}
+        <form method="post" action="/agents/default"><input type="hidden" name="id" value="{{$ag.ID}}"><button class="secondary">Make default</button></form>
+        <form method="post" action="/agents/delete" onsubmit="return confirm('Delete this agent and its threads?')"><input type="hidden" name="id" value="{{$ag.ID}}"><button class="secondary">Delete</button></form>
+        {{end}}
+      </div>
+
+      <form method="post" action="/agents/save">
+        <input type="hidden" name="id" value="{{$ag.ID}}">
+        <div class="row">
+          <div><label>Name</label><input name="name" value="{{$ag.Name}}" required></div>
+          <div><label>Description</label><input name="description" value="{{$ag.Description}}"></div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Model</label>
+            <select name="model">
+              {{range $.ModelOptions}}<option value="{{.Alias}}"{{if eq $ag.Model .ID}} selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </div>
+          <div>
+            <label>Runtime</label>
+            <select name="runtime">
+              <option value=""{{if eq $ag.Runtime ""}} selected{{end}}>Use my default runtime</option>
+              {{range $.Runtimes}}<option value="{{.ID}}"{{if eq $ag.Runtime .ID}} selected{{end}}{{if not .Available}} disabled{{end}}>{{.Label}}{{if not .Available}} (coming soon){{end}}</option>{{end}}
+            </select>
+          </div>
+        </div>
+        <label>Soul (the agent's identity &amp; behavior — markdown; blank = the default assistant)</label>
+        <textarea name="soul" rows="8" placeholder="You are a sharp, concise writing coach. …">{{$ag.Soul}}</textarea>
+        <div style="margin-top:.6rem"><button type="submit">Save</button></div>
+      </form>
+    </details>
+  {{end}}
+</div>
+
+<div class="panel">
+  <h2>New agent</h2>
+  <form method="post" action="/agents/save">
+    <div class="row">
+      <div><label for="na_name">Name</label><input id="na_name" name="name" placeholder="Writing coach" required></div>
+      <div><label for="na_desc">Description</label><input id="na_desc" name="description" placeholder="Helps me write better"></div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="na_model">Model</label>
+        <select id="na_model" name="model">{{range .ModelOptions}}<option value="{{.Alias}}">{{.Label}}</option>{{end}}</select>
+      </div>
+      <div>
+        <label for="na_runtime">Runtime</label>
+        <select id="na_runtime" name="runtime">
+          <option value="">Use my default runtime</option>
+          {{range .Runtimes}}<option value="{{.ID}}"{{if not .Available}} disabled{{end}}>{{.Label}}{{if not .Available}} (coming soon){{end}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <label for="na_soul">Soul (markdown; blank = the default assistant)</label>
+    <textarea id="na_soul" name="soul" rows="6" placeholder="You are …"></textarea>
+    <div style="margin-top:.6rem"><button type="submit">Create agent</button></div>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Telegram bots</h2>
+  <p class="muted">Connect agents to <strong>Telegram</strong>. Each bot is <strong>bound to an agent</strong> — message your “work” bot and the work agent answers. Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a>, paste its token, bind an agent, then pair it. Tokens are encrypted at rest and never shown.{{if not .BoxEnabled}} <strong>Set MASTER_KEY in your env file to store bot tokens.</strong>{{end}}</p>
+
+  {{if .TgBots}}
+  <table style="margin-top:.5rem">
+    <tr><th>Label</th><th>Bot</th><th>Agent</th><th>Status</th><th></th></tr>
+    {{range .TgBots}}
+    <tr>
+      <td><strong>{{.Label}}</strong></td>
+      <td class="muted">{{if .Username}}<a href="https://t.me/{{.Username}}" target="_blank" rel="noreferrer">@{{.Username}}</a>{{else if .Legacy}}<span class="muted">env token</span>{{else}}<span title="username resolves shortly after adding">…</span>{{end}}</td>
+      <td class="muted">{{if .AgentName}}{{.AgentName}}{{else}}<span class="muted">active agent</span>{{end}}</td>
+      <td>
+        {{if .Enabled}}<span class="pill">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}
+        {{if .Pairings}}
+        <div style="margin-top:.35rem">
+          {{range .Pairings}}
+          <div style="display:flex; align-items:center; gap:.4rem; margin:.15rem 0">
+            <span class="pill">paired</span><span class="muted" style="font-size:.8rem">chat {{.ExternalID}}</span>
+            <form method="post" action="/agents/telegram/unpair" onsubmit="return confirm('Unpair this chat?')" style="display:inline">
+              <input type="hidden" name="bot_id" value="{{.BotID}}">
+              <input type="hidden" name="external_id" value="{{.ExternalID}}">
+              <button class="secondary" style="padding:.15rem .55rem; font-size:.75rem">Unpair</button>
+            </form>
+          </div>
+          {{end}}
+        </div>
+        {{else}}<span class="pill">unpaired</span>{{end}}
+      </td>
+      <td>
+        {{if not .Legacy}}
+        <details style="display:inline-block; vertical-align:top; margin-left:.4rem">
+          <summary class="secondary" style="cursor:pointer; display:inline-block">Edit</summary>
+          {{$botAgent := .AgentID}}
+          <form method="post" action="/agents/telegram/update" style="margin-top:.5rem">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <label>Label</label>
+            <input name="label" value="{{.Label}}" required>
+            <label style="margin-top:.5rem">Bound agent</label>
+            <select name="agent_id">
+              <option value="0"{{if eq $botAgent 0}} selected{{end}}>Active agent (unbound)</option>
+              {{range $.Agents}}<option value="{{.ID}}"{{if eq .ID $botAgent}} selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+            <label style="margin-top:.5rem"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Enabled</label>
+            <label style="margin-top:.5rem">Replace token <span class="muted">(leave blank to keep)</span></label>
+            <input name="token" type="password" autocomplete="off" placeholder="paste a new token to replace">
+            <div style="margin-top:.5rem"><button type="submit">Save</button></div>
+          </form>
+          <form method="post" action="/agents/telegram/delete" onsubmit="return confirm('Delete this bot? Its pairing is removed.')" style="margin-top:.5rem">
+            <input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button>
+          </form>
+        </details>
+        {{else}}<span class="muted" style="font-size:.85rem">managed via environment</span>{{end}}
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}<p class="muted">No bots yet. Add one below.</p>{{end}}
+
+  {{if .BoxEnabled}}
+  <details style="margin-top:.75rem">
+    <summary><strong>Add a bot</strong></summary>
+    <form method="post" action="/agents/telegram/add" style="margin-top:.75rem">
+      <label for="b_label">Label</label>
+      <input id="b_label" name="label" placeholder="Work bot" autocomplete="off" required>
+      <label for="b_token" style="margin-top:.5rem">Bot token <span class="muted">(from @BotFather)</span></label>
+      <input id="b_token" name="token" type="password" autocomplete="off" placeholder="123456:ABC-DEF…" required>
+      <label for="b_agent" style="margin-top:.5rem">Bind to agent</label>
+      <select id="b_agent" name="agent_id">
+        <option value="0">Active agent (unbound — follows /agent)</option>
+        {{range .Agents}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      <p class="muted" style="margin-top:.5rem">The token is validated with Telegram and stored encrypted. After adding, pair it below.</p>
+      <div style="margin-top:.75rem"><button type="submit">Add bot</button></div>
+    </form>
+  </details>
+  {{end}}
+</div>
+
+<div class="panel">
+  <h2>Pair a Telegram chat</h2>
+  <p class="muted">Each bot is paired separately. Open the bot in Telegram (tap its @handle above), send it any message, and it replies with a 6-character code (valid 15 minutes) — the code knows which bot it's for. Enter it here.</p>
+  <form method="post" action="/agents/telegram/pair">
+    <label for="code">Pairing code</label>
+    <input id="code" name="code" placeholder="ABC234" style="max-width:240px; text-transform:uppercase" required>
+    <div style="margin-top:.75rem"><button type="submit">Pair</button></div>
+  </form>
+</div>
+{{template "footer" .}}{{end}}

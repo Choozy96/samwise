@@ -1,0 +1,152 @@
+{{define "chat"}}{{template "header" .}}
+<h1>Chat</h1>
+<div style="display:flex; align-items:center; gap:.5rem; margin-bottom:.6rem; font-size:.85rem; color:var(--muted); flex-wrap:wrap;">
+  <form method="post" action="/agents/select" style="display:inline-flex; align-items:center; gap:.3rem; margin:0;">
+    <input type="hidden" name="return" value="/chat">
+    <span>Agent:</span>
+    <select name="agent_id" onchange="this.form.submit()" style="width:auto; padding:.2rem .4rem;">
+      {{range .Agents}}<option value="{{.ID}}"{{if eq .ID $.ActiveAgent.ID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </form>
+  <span class="pill">{{.RuntimeLabel}}</span>
+  <span class="pill">{{.ModelLabel}}</span>
+  {{if not .RuntimeAvailable}}<span class="pill" style="color:var(--accent); border-color:var(--accent)">falls back to Claude SDK</span>{{end}}
+  <span style="flex:1"></span>
+  <span>Type <code>/help</code> · <a href="/agents">manage agents</a></span>
+</div>
+<div class="panel" style="padding:0">
+  <div id="transcript" style="padding:1rem; max-height:60vh; overflow-y:auto;">
+    {{range .Messages}}
+      {{if eq .Role "user"}}
+        <div class="msg user"><div class="bubble">{{.Content}}</div></div>
+      {{else if eq .Role "assistant"}}
+        <div class="msg assistant"><div class="bubble">{{.Content}}</div></div>
+      {{else if eq .Role "tool"}}
+        <div class="msg tool">{{.Content}}</div>
+      {{end}}
+    {{end}}
+  </div>
+  <div id="attachbar" style="display:none; flex-wrap:wrap; gap:.4rem; padding:.5rem .75rem 0;"></div>
+  <form id="chatform" style="display:flex; gap:.5rem; align-items:center; border-top:1px solid var(--border); padding:.75rem;">
+    <input type="file" id="files" multiple style="display:none">
+    <button type="button" id="attachbtn" class="secondary" title="Attach files" aria-label="Attach files" style="padding:.5rem .7rem;">📎</button>
+    <input id="msg" name="message" placeholder="Message your assistant…" autocomplete="off" autofocus style="flex:1">
+    <button id="send" type="submit">Send</button>
+  </form>
+</div>
+
+<style>
+  .msg { margin:.5rem 0; display:flex; }
+  .msg.user { justify-content:flex-end; }
+  .msg .bubble { max-width:78%; padding:.55rem .8rem; border-radius:14px; white-space:pre-wrap; word-wrap:break-word; }
+  .msg.user .bubble { background:var(--link); color:#fff; }
+  .msg.assistant .bubble { background:var(--subtle); color:var(--fg); border:1px solid var(--border); }
+  .msg.tool { font-size:.8rem; color:var(--muted); font-style:italic; padding-left:.3rem; }
+  .chip { display:inline-flex; align-items:center; gap:.35rem; font-size:.8rem; background:var(--subtle); border:1px solid var(--border); border-radius:999px; padding:.15rem .6rem; }
+  .chip button { background:none; border:0; color:var(--muted); cursor:pointer; padding:0; font-size:1rem; line-height:1; }
+</style>
+
+<script>
+const transcript = document.getElementById('transcript');
+const form = document.getElementById('chatform');
+const input = document.getElementById('msg');
+const sendBtn = document.getElementById('send');
+const fileInput = document.getElementById('files');
+const attachBtn = document.getElementById('attachbtn');
+const attachBar = document.getElementById('attachbar');
+let attachments = [];
+
+function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
+scrollToBottom();
+
+function renderChips() {
+  attachBar.innerHTML = '';
+  attachBar.style.display = attachments.length ? 'flex' : 'none';
+  attachments.forEach((f, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = '📎 ' + f.name + ' ';
+    const x = document.createElement('button');
+    x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'Remove ' + f.name);
+    x.onclick = () => { attachments.splice(i, 1); renderChips(); };
+    chip.appendChild(x);
+    attachBar.appendChild(chip);
+  });
+}
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  for (const f of fileInput.files) attachments.push(f);
+  fileInput.value = '';
+  renderChips();
+});
+
+function addBubble(role, text) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + role;
+  if (role === 'tool') { wrap.textContent = text; }
+  else {
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = text;
+    wrap.appendChild(b);
+  }
+  transcript.appendChild(wrap);
+  scrollToBottom();
+  return wrap;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text && attachments.length === 0) return;
+  input.value = '';
+  input.disabled = true; sendBtn.disabled = true;
+
+  let shown = text;
+  if (attachments.length) shown = (text ? text + '\n' : '') + '📎 ' + attachments.map(f => f.name).join(', ');
+  addBubble('user', shown);
+
+  const fd = new FormData();
+  fd.append('message', text);
+  for (const f of attachments) fd.append('attachments', f);
+  attachments = []; renderChips();
+
+  const assistantWrap = addBubble('assistant', '');
+  const bubble = assistantWrap.querySelector('.bubble');
+  bubble.textContent = '…';
+  let acc = '';
+
+  try {
+    const resp = await fetch('/chat/send', { method: 'POST', body: fd });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === 'text') {
+          if (acc === '') bubble.textContent = '';
+          acc += ev.text; bubble.textContent = acc; scrollToBottom();
+        } else if (ev.type === 'tool') {
+          addBubble('tool', '🔧 ' + ev.text);
+        } else if (ev.type === 'error') {
+          bubble.textContent = (acc || '') + '\n⚠️ ' + ev.text;
+        }
+      }
+    }
+    if (acc === '' && bubble.textContent === '…') bubble.textContent = '(no response)';
+  } catch (err) {
+    bubble.textContent = '⚠️ ' + err;
+  } finally {
+    input.disabled = false; sendBtn.disabled = false; input.focus();
+  }
+});
+</script>
+{{template "footer" .}}{{end}}

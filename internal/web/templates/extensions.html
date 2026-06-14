@@ -1,0 +1,177 @@
+{{define "extensions"}}{{template "header" .}}
+<h1>Extensions</h1>
+<p class="muted">Give your assistant new powers — external tools (MCP servers) and skills (instructions) — without changing code.</p>
+
+<div class="panel">
+  <h2>MCP servers</h2>
+  <p class="muted">External tool servers (Google Calendar, Todoist, Notion…). Credentials are encrypted at rest.{{if not .BoxEnabled}} <strong>Set MASTER_KEY in your env file to store credentials.</strong>{{end}}</p>
+  {{if .MCPs}}
+  <table>
+    <thead><tr><th>Name</th><th>Transport</th><th>Target</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {{range .MCPs}}
+      <tr>
+        <td><code>{{.Name}}</code>{{if .IsGlobal}} <span class="pill">global</span>{{end}}</td>
+        <td>{{.Transport}}</td>
+        <td class="muted">{{if eq .Transport "http"}}{{.URL}}{{else}}{{.Command}}{{end}}</td>
+        <td>{{if .Enabled}}<span class="pill">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}</td>
+        <td>
+          {{if not .IsGlobal}}
+          <form method="post" action="/extensions/mcp/toggle" style="display:inline">
+            <input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="enabled" value="{{if .Enabled}}0{{else}}1{{end}}">
+            <button class="secondary">{{if .Enabled}}Disable{{else}}Enable{{end}}</button>
+          </form>
+          <form method="post" action="/extensions/mcp/delete" onsubmit="return confirm('Delete this server?')" style="display:inline">
+            <input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button>
+          </form>
+          {{end}}
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted">No MCP servers registered yet.</p>{{end}}
+
+  <details style="margin-top:1rem">
+    <summary><strong>Add an MCP server</strong></summary>
+    <form method="post" action="/extensions/mcp/add" style="margin-top:.75rem">
+      <div class="row">
+        <div><label for="m_name">Name</label><input id="m_name" name="name" placeholder="todoist" required></div>
+        <div><label for="m_transport">Transport</label>
+          <select id="m_transport" name="transport"><option value="stdio">stdio (command)</option><option value="http">http (url)</option></select>
+        </div>
+      </div>
+      <label for="m_command">Command <span class="muted">(stdio)</span></label>
+      <input id="m_command" name="command" placeholder="npx">
+      <label for="m_args">Args <span class="muted">(stdio, space-separated)</span></label>
+      <input id="m_args" name="args" placeholder="-y @abhiz123/todoist-mcp-server">
+      <label for="m_url">URL <span class="muted">(http)</span></label>
+      <input id="m_url" name="url" placeholder="https://mcp.example.com/sse">
+      <label for="m_secrets">Credentials <span class="muted">(KEY=value per line; env for stdio, headers for http; encrypted at rest)</span></label>
+      <textarea id="m_secrets" name="secrets" rows="3" placeholder="TODOIST_API_TOKEN=..."></textarea>
+      <div style="margin-top:.75rem"><button type="submit">Add server</button></div>
+    </form>
+  </details>
+</div>
+
+<div class="panel">
+  <h2>Secrets</h2>
+  <p class="muted">API tokens and keys your skills need (e.g. <code>TODOIST_TOKEN</code>, <code>NOTION_TOKEN</code>). Stored encrypted and injected into every run as an environment variable — never shown in chat, memory, or here.{{if not .BoxEnabled}} <strong>Set MASTER_KEY in your env file to store secrets.</strong>{{end}}</p>
+
+  {{if .AuthStatuses}}
+  <h3 style="margin-top:.5rem">Credential status</h3>
+  <p class="muted">Read-only — expiry of OAuth credentials (the Claude subscription token and any OAuth secrets). Values are never shown. OAuth secrets auto-refresh every 15&nbsp;min; the button refreshes everything now (incl. the Claude login — takes a few seconds).</p>
+  <form method="post" action="/extensions/secrets/refresh" style="margin:.25rem 0 .5rem"><button class="secondary" type="submit">Refresh credentials now</button></form>
+  <table>
+    {{range .AuthStatuses}}
+    <tr>
+      <td><strong>{{.Label}}</strong></td>
+      <td class="{{if .Expired}}error{{else if .Warn}}muted{{end}}">{{if .Expired}}⚠ {{else if .Warn}}⏳ {{end}}{{.Detail}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{end}}
+
+  {{if .Secrets}}
+  <table style="margin-top:.5rem">
+    <tr><th>Name</th><th>Type</th><th>Value</th><th></th></tr>
+    {{range .Secrets}}
+    <tr>
+      <td><code>{{.Name}}</code></td>
+      <td class="muted">{{if eq .Kind "oauth"}}OAuth{{else}}token{{end}}</td>
+      <td class="muted">••••••••</td>
+      <td><form method="post" action="/extensions/secrets/delete" onsubmit="return confirm('Delete this secret?')"><input type="hidden" name="name" value="{{.Name}}"><button class="secondary">Delete</button></form></td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}<p class="muted">No secrets yet.</p>{{end}}
+  {{if .BoxEnabled}}
+  <details style="margin-top:.75rem">
+    <summary><strong>Add a secret</strong></summary>
+    <form method="post" action="/extensions/secrets/add" style="margin-top:.75rem">
+      <label for="s_name">Name (environment variable)</label>
+      <input id="s_name" name="name" placeholder="TODOIST_TOKEN" autocomplete="off" required>
+      <label for="s_value" style="margin-top:.5rem">Value</label>
+      <input id="s_value" name="value" type="password" autocomplete="off" required>
+      <label for="s_kind" style="margin-top:.5rem">Type</label>
+      <select id="s_kind" name="kind">
+        <option value="value">Token (a single value, e.g. an API token)</option>
+        <option value="oauth">OAuth (a token JSON blob — its expiry is shown read-only)</option>
+      </select>
+      <p class="muted" style="margin-top:.5rem">Use the env var name your skill reads, e.g. <code>TODOIST_TOKEN</code>. The value is write-only — you can replace it but never read it back. For <strong>OAuth</strong>, paste the token JSON; the app shows its expiry but never refreshes/writes it back.</p>
+      <div style="margin-top:.75rem"><button type="submit">Save secret</button></div>
+    </form>
+  </details>
+  {{end}}
+</div>
+
+<div class="panel">
+  <h2>Skills</h2>
+  <p class="muted">Markdown instructions that shape behavior. "Always on" skills are injected into every chat; others are followed when relevant or named by a job.</p>
+  {{if .Skills}}
+  {{range .Skills}}
+    <details style="border:1px solid var(--border); border-radius:6px; padding:.5rem .75rem; margin-bottom:.5rem;">
+      <summary><code>{{.Name}}</code> — {{.Description}} {{if .AlwaysOn}}<span class="pill">always on</span>{{end}}{{if .HasBundle}} <span class="pill">bundle</span>{{end}}{{if .IsGlobal}} <span class="pill">global</span>{{end}}{{if not .Enabled}} <span class="pill">disabled</span>{{end}}</summary>
+      {{if not .IsGlobal}}
+      <form method="post" action="/extensions/skills/save" style="margin-top:.75rem">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <div class="row">
+          <div><label>Name</label><input name="name" value="{{.Name}}" required></div>
+          <div><label>Description</label><input name="description" value="{{.Description}}"></div>
+        </div>
+        <label>Content (markdown)</label>
+        <textarea name="content" rows="8">{{.Content}}</textarea>
+        <label style="display:inline-flex; gap:.4rem; align-items:center; margin-top:.5rem;"><input type="checkbox" name="always_on" value="1"{{if .AlwaysOn}} checked{{end}}> Always on</label>
+        <div style="margin-top:.6rem; display:flex; gap:.5rem;">
+          <button type="submit">Save</button>
+        </div>
+      </form>
+      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+        <form method="post" action="/extensions/skills/toggle"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="enabled" value="{{if .Enabled}}0{{else}}1{{end}}"><button class="secondary">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>
+        <form method="post" action="/extensions/skills/delete" onsubmit="return confirm('Delete this skill?')"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form>
+      </div>
+      {{else}}<p class="muted" style="margin-top:.5rem">Global skill — managed by the admin. Create your own copy to customize.</p>{{end}}
+      {{if .Bundle}}
+      {{$sid := .ID}}
+      <div style="margin-top:.6rem">
+        <strong>Bundle files</strong> <span class="muted">(scripts &amp; assets — read-only)</span>
+        <ul style="margin:.3rem 0 0; padding-left:1.2rem; list-style:none;">
+          {{range .Bundle}}
+          <li>📄 <a href="/extensions/skills/file?id={{$sid}}&amp;path={{.Path}}"><code>{{.Path}}</code></a> <span class="muted">· {{.Size}}</span></li>
+          {{end}}
+        </ul>
+      </div>
+      {{end}}
+    </details>
+  {{end}}
+  {{else}}<p class="muted">No skills yet.</p>{{end}}
+
+  <details style="margin-top:1rem">
+    <summary><strong>Add a skill</strong></summary>
+    <form method="post" action="/extensions/skills/save" style="margin-top:.75rem">
+      <div class="row">
+        <div><label for="s_name">Name</label><input id="s_name" name="name" placeholder="weekly-review" required></div>
+        <div><label for="s_desc">Description</label><input id="s_desc" name="description" placeholder="How to run my weekly review"></div>
+      </div>
+      <label for="s_content">Content (markdown)</label>
+      <textarea id="s_content" name="content" rows="6" placeholder="# Weekly review&#10;Steps the assistant should follow…"></textarea>
+      <label style="display:inline-flex; gap:.4rem; align-items:center; margin-top:.5rem;"><input type="checkbox" name="always_on" value="1"> Always on</label>
+      <div style="margin-top:.6rem"><button type="submit">Add skill</button></div>
+    </form>
+  </details>
+
+  <details style="margin-top:1rem">
+    <summary><strong>Import a skill (.zip)</strong></summary>
+    <form method="post" action="/extensions/skills/import" enctype="multipart/form-data" style="margin-top:.75rem">
+      <p class="muted">Upload a zipped skill folder — a <code>SKILL.md</code> (with <code>name</code>/<code>description</code> front-matter) plus any scripts &amp; assets. Re-importing the same name updates it in place. Toggle the skill "always on" to use it in chat.</p>
+      <input type="file" name="skillzip" accept=".zip,application/zip" required>
+      <div style="margin-top:.6rem"><button type="submit">Import skill</button></div>
+      {{if .AgentToolsOn}}
+      <p class="muted" style="margin-top:.5rem">✅ Scoped tools are enabled here — imported skills can run their scripts.</p>
+      {{else}}
+      <p class="muted" style="margin-top:.5rem">⚠️ Scoped tools are off in this environment — the skill's instructions work, but its scripts won't execute. They run in the Docker container, or set <code>ALLOW_AGENT_TOOLS=true</code>.</p>
+      {{end}}
+    </form>
+  </details>
+</div>
+{{template "footer" .}}{{end}}

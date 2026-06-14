@@ -1,0 +1,91 @@
+{{define "memory"}}{{template "header" .}}
+<h1>Memory</h1>
+<p class="muted">What your assistant remembers about you — browse by topic or date, or search. Only you can see or edit this.</p>
+
+<form method="get" action="/memory" style="margin:.5rem 0 1rem">
+  <input name="q" value="{{.Query}}" placeholder="Search all memory…" style="width:55%; max-width:30rem">
+  <button type="submit">Search</button>
+  {{if or .Query .Topic .Date}} <a href="/memory" style="margin-left:.5rem">Clear</a>{{end}}
+</form>
+
+{{if eq .View "search"}}
+  <h2>Results for "{{.Query}}"</h2>
+  {{if .Hits}}
+  <div class="table-wrap"><table><thead><tr><th>Layer</th><th>Topic</th><th>Content</th><th>When</th></tr></thead><tbody>
+    {{range .Hits}}<tr><td><span class="pill">{{.Layer}}</span></td><td>{{.Topic}}</td><td>{{.Content}}</td><td class="muted">{{.TS}}</td></tr>{{end}}
+  </tbody></table></div>
+  {{else}}<p class="muted">No matches.</p>{{end}}
+
+{{else if eq .View "topic"}}
+  <p><a href="/memory">← All memory</a></p>
+  <h2>Topic: <code>{{.Topic}}</code></h2>
+  {{if .Semantic}}
+  <div class="table-wrap"><table><thead><tr><th>Content</th><th>Kind</th><th>Created</th><th></th></tr></thead><tbody>
+    {{range .Semantic}}{{template "semrow" .}}{{end}}
+  </tbody></table></div>
+  <div style="margin-top:.6rem; display:flex; gap:1rem; align-items:center">
+    {{if gt .Page 1}}<a href="/memory?topic={{.Topic}}&page={{.PrevPage}}">← Prev</a>{{end}}
+    <span class="muted">Page {{.Page}}</span>
+    {{if .HasNext}}<a href="/memory?topic={{.Topic}}&page={{.NextPage}}">Next →</a>{{end}}
+  </div>
+  {{else}}<p class="muted">Nothing here.</p>{{end}}
+
+{{else if eq .View "date"}}
+  <p><a href="/memory">← All memory</a></p>
+  <h2>{{.Date}}</h2>
+  {{range .Episodic}}
+  <div class="panel">
+    <div class="muted" style="font-size:.8rem">{{.PeriodType}} · {{.PeriodDate}}</div>
+    <div style="white-space:pre-wrap">{{.Content}}</div>
+    <form method="post" action="/memory/delete" onsubmit="return confirm('Delete this entry?')" style="margin-top:.4rem">
+      <input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="layer" value="episodic">
+      <input type="hidden" name="back" value="/memory?date={{$.Date}}">
+      <button class="secondary">Delete</button>
+    </form>
+  </div>
+  {{end}}
+  <div style="margin-top:.6rem; display:flex; gap:1rem; align-items:center">
+    {{if gt .Page 1}}<a href="/memory?date={{.Date}}&page={{.PrevPage}}">← Prev</a>{{end}}
+    <span class="muted">Page {{.Page}}</span>
+    {{if .HasNext}}<a href="/memory?date={{.Date}}&page={{.NextPage}}">Next →</a>{{end}}
+  </div>
+
+{{else}}
+  <div class="row">
+    <div class="panel" style="flex:1">
+      <h2>Topics</h2>
+      {{if .Topics}}<ul style="list-style:none; padding-left:0; margin:0">{{range .Topics}}<li style="margin:.15rem 0"><a href="/memory?topic={{.Topic}}"><code>{{.Topic}}</code></a> <span class="muted">· {{.Count}}</span></li>{{end}}</ul>
+      {{else}}<p class="muted">No topics yet.</p>{{end}}
+    </div>
+    <div class="panel" style="flex:1">
+      <h2>Daily memory (by date)</h2>
+      {{if .Dates}}<ul style="list-style:none; padding-left:0; margin:0">{{range .Dates}}<li style="margin:.15rem 0"><a href="/memory?date={{.Date}}">{{.Date}}</a> <span class="muted">· {{.Count}}</span></li>{{end}}</ul>
+      {{else}}<p class="muted">No dated entries yet — these are daily summaries.</p>{{end}}
+    </div>
+  </div>
+
+  {{if .Semantic}}
+  <h2 style="margin-top:1rem">Recent facts</h2>
+  <div class="table-wrap"><table><thead><tr><th>Content</th><th>Topic</th><th>Kind</th><th>Created</th><th></th></tr></thead><tbody>
+    {{range .Semantic}}{{template "semrowt" .}}{{end}}
+  </tbody></table></div>
+  {{end}}
+{{end}}
+
+<div class="panel" style="margin-top:1.25rem">
+  <h2>Add a memory</h2>
+  <form method="post" action="/memory/add">
+    <label for="content">Content</label>
+    <textarea id="content" name="content" rows="2" required placeholder="e.g. Prefers concise answers"></textarea>
+    <div class="row">
+      <div><label for="topic">Topic</label><input id="topic" name="topic" placeholder="e.g. preferences"></div>
+      <div><label for="kind">Kind</label><select id="kind" name="kind"><option value="fact">fact</option><option value="preference">preference</option><option value="event">event</option></select></div>
+    </div>
+    <div style="margin-top:.75rem"><button type="submit">Save</button></div>
+  </form>
+</div>
+{{template "footer" .}}{{end}}
+
+{{define "semrow"}}<tr><td>{{.Content}}</td><td><span class="pill">{{.Kind}}</span></td><td class="muted">{{.CreatedAt}}</td><td><form method="post" action="/memory/delete" onsubmit="return confirm('Delete this memory?')" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form></td></tr>{{end}}
+
+{{define "semrowt"}}<tr><td>{{.Content}}</td><td>{{.Topic}}</td><td><span class="pill">{{.Kind}}</span></td><td class="muted">{{.CreatedAt}}</td><td><form method="post" action="/memory/delete" onsubmit="return confirm('Delete this memory?')" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form></td></tr>{{end}}

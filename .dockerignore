@@ -1,0 +1,17 @@
+# Keep the build context small and never ship secrets/runtime data.
+.git/
+.gitignore
+/bin/
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+*.key
+/secrets/
+/run/
+/workspaces/
+*.md
+!README.md
+.idea/
+.vscode/
