@@ -1,7 +1,7 @@
 // Package web implements the orchestrator's HTTP portal: auth, chat, settings,
-// memory editor, jobs, audit, admin, and the rendered user guide (spec §12).
+// memory editor, jobs, audit, admin, and the rendered user guide.
 //
-// Server-rendered with html/template plus light JS — no SPA (spec §12). This
+// Server-rendered with html/template plus light JS — no SPA. This
 // file holds the Server type, route table, and the health endpoint; auth,
 // settings, and chat handlers live in sibling files.
 package web
@@ -49,7 +49,7 @@ func New(cfg *config.Config, db *store.DB, log *slog.Logger, box *secretbox.Box,
 }
 
 // Handler builds the HTTP route table. Go 1.22+ method-aware patterns keep
-// routing in the stdlib (spec §12: no framework).
+// routing in the stdlib.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -122,7 +122,7 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// handleHealth is the uptime/monitoring endpoint (spec §11). It verifies DB
+// handleHealth is the uptime/monitoring endpoint. It verifies DB
 // connectivity so a crash-looping DB surfaces as an unhealthy status.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	status := "ok"

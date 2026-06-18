@@ -27,22 +27,25 @@ const (
 // bot); agentID, when non-zero, binds every message on this bot to that agent's
 // persona/thread instead of the user's active agent.
 type Bot struct {
-	client  *Client
-	db      *store.DB
-	orch    *orchestrator.Orchestrator
-	log     *slog.Logger
-	botID   int64
-	agentID int64
+	client   *Client
+	db       *store.DB
+	orch     *orchestrator.Orchestrator
+	log      *slog.Logger
+	botID    int64
+	agentID  int64
+	username string // the bot's @username, for detecting group @mentions
+	selfID   int64  // the bot's Telegram user id, for detecting replies to it
 }
 
 // NewBot constructs the inbound bot. botID 0 and agentID 0 reproduce the legacy
-// single-bot, active-agent behavior.
-func NewBot(client *Client, db *store.DB, orch *orchestrator.Orchestrator, log *slog.Logger, botID, agentID int64) *Bot {
-	return &Bot{client: client, db: db, orch: orch, log: log, botID: botID, agentID: agentID}
+// single-bot, active-agent behavior. username/selfID (from getMe) let it detect
+// when a group message is addressed to it.
+func NewBot(client *Client, db *store.DB, orch *orchestrator.Orchestrator, log *slog.Logger, botID, agentID, selfID int64, username string) *Bot {
+	return &Bot{client: client, db: db, orch: orch, log: log, botID: botID, agentID: agentID, selfID: selfID, username: username}
 }
 
 // Run polls for updates until ctx is cancelled. Inbound long-polling reconnects
-// automatically on error (spec §11).
+// automatically on error.
 func (b *Bot) Run(ctx context.Context) {
 	b.log.Info("telegram bot started")
 	var offset int64
@@ -71,6 +74,13 @@ func (b *Bot) Run(ctx context.Context) {
 }
 
 func (b *Bot) handle(ctx context.Context, u Update) {
+	// The bot being added to a group fires a my_chat_member update — pair the
+	// group proactively so the owner gets a code without anyone having to message
+	// it first.
+	if u.MyChatMember != nil {
+		b.handleMembership(ctx, u.MyChatMember)
+		return
+	}
 	msg := u.Message
 	if msg == nil || msg.From == nil || msg.Chat == nil {
 		return
@@ -92,11 +102,14 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	if text == "" && msg.Sticker != nil && msg.Sticker.Emoji != "" {
 		text = "[sticker: " + msg.Sticker.Emoji + "]"
 	}
-	externalID := strconv.FormatInt(msg.From.ID, 10)
+	// In a group, the whole group is paired by its chat id (any member then talks
+	// to the paired user's assistant — shared context is intended). In a 1:1 DM the
+	// sender's id is the key.
+	externalID := senderKey(msg.Chat, msg.From)
 
 	ident, err := b.db.GetIdentityByExternal(ctx, channel, b.botID, externalID)
 	if errors.Is(err, store.ErrNotFound) {
-		b.handleUnpaired(ctx, externalID, msg.Chat.ID)
+		b.handleUnpaired(ctx, externalID, msg.Chat.ID, isGroup(msg.Chat))
 		return
 	}
 	if err != nil {
@@ -107,6 +120,14 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	user, err := b.db.GetUserByID(ctx, ident.UserID)
 	if err != nil || user.Disabled {
 		// Paired to a missing/disabled account: drop silently.
+		return
+	}
+
+	// In a group, respect the user's reply mode: by default only respond when the
+	// bot is addressed (@mention, a reply to it, or a command); "all" responds to
+	// every message. (Requires the bot's Telegram privacy mode off to even receive
+	// non-addressed messages.)
+	if isGroup(msg.Chat) && !b.groupShouldReply(ctx, user.ID, msg, text) {
 		return
 	}
 
@@ -144,13 +165,21 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	// tools can read them.
 	atts := b.downloadAttachments(ctx, user.ID, msg)
 
+	// When this message replies to another (the common "tag the bot in a reply
+	// chain" case), the user's text alone is contextless — the agent can't see
+	// the message being pointed at. Prepend the quoted parent so it can.
+	dispatchText := text
+	if rc := replyContext(msg, b.selfID); rc != "" {
+		dispatchText = rc + text
+	}
+
 	// Dispatch to this bot's bound agent (boundAgent), or the user's active agent
 	// when the bot is unbound (boundAgent == nil).
 	res, err := b.orch.Dispatch(ctx, orchestrator.DispatchRequest{
 		User:             user,
 		Channel:          channel,
 		Agent:            boundAgent,
-		UserMessage:      text,
+		UserMessage:      dispatchText,
 		Attachments:      atts,
 		StoreUserMessage: true,
 	}, nil)
@@ -264,10 +293,106 @@ func (b *Bot) keepTyping(ctx context.Context, chatID int64) {
 	}
 }
 
-// handleUnpaired issues a pairing code to an unknown sender (spec §4.1). This is
-// the only reply an unpaired sender gets; it lets the owner link the account
+// handleMembership reacts to the bot's membership changing. When it's added to
+// (or promoted in) a group that isn't paired yet, it issues a pairing code to the
+// group so the owner can link it from the portal.
+func (b *Bot) handleMembership(ctx context.Context, m *ChatMemberUpdate) {
+	if m.Chat == nil || !isGroup(m.Chat) || m.NewChatMember == nil {
+		return
+	}
+	if s := m.NewChatMember.Status; s != "member" && s != "administrator" {
+		return // left/kicked/restricted — nothing to do
+	}
+	externalID := strconv.FormatInt(m.Chat.ID, 10)
+	// Don't re-prompt a group that's already linked.
+	if _, err := b.db.GetIdentityByExternal(ctx, channel, b.botID, externalID); err == nil {
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		b.log.Error("telegram membership identity lookup", "err", err)
+		return
+	}
+	b.handleUnpaired(ctx, externalID, m.Chat.ID, true)
+}
+
+// senderKey returns the pairing/identity key for a message: the group's chat id
+// for a group chat (so the whole group maps to one user), else the sender's id.
+func senderKey(chat *Chat, from *User) string {
+	if isGroup(chat) {
+		return strconv.FormatInt(chat.ID, 10)
+	}
+	return strconv.FormatInt(from.ID, 10)
+}
+
+// isGroup reports whether a chat is a Telegram group or supergroup.
+func isGroup(chat *Chat) bool {
+	return chat != nil && (chat.Type == "group" || chat.Type == "supergroup")
+}
+
+// groupShouldReply decides whether to act on a group message given the paired
+// user's reply mode. "all" always replies; "mention" (default) replies only when
+// the message is addressed to the bot.
+func (b *Bot) groupShouldReply(ctx context.Context, userID int64, msg *Message, text string) bool {
+	mode := "mention"
+	if s, err := b.db.GetSettings(ctx, userID); err == nil && s.GroupReplyMode != "" {
+		mode = s.GroupReplyMode
+	}
+	if mode == "all" {
+		return true
+	}
+	return b.addressedInGroup(msg, text)
+}
+
+// addressedInGroup reports whether a group message is directed at this bot: a
+// slash command, a reply to one of the bot's messages, or an @mention of it.
+func (b *Bot) addressedInGroup(msg *Message, text string) bool {
+	t := strings.TrimSpace(text)
+	if strings.HasPrefix(t, "/") {
+		return true
+	}
+	if msg.ReplyToMessage != nil && msg.ReplyToMessage.From != nil &&
+		b.selfID != 0 && msg.ReplyToMessage.From.ID == b.selfID {
+		return true
+	}
+	if b.username != "" && strings.Contains(strings.ToLower(t), "@"+strings.ToLower(b.username)) {
+		return true
+	}
+	return false
+}
+
+// replyContext renders a quoted block describing the message this one replies to,
+// so the agent can "see" what it was tagged on in a reply chain. Telegram only
+// exposes the immediate parent (not the whole chain), which is what we quote.
+// Returns "" when there's no reply or the parent carries no quotable text.
+func replyContext(msg *Message, selfID int64) string {
+	rt := msg.ReplyToMessage
+	if rt == nil {
+		return ""
+	}
+	quoted := strings.TrimSpace(rt.Text)
+	if quoted == "" {
+		quoted = strings.TrimSpace(rt.Caption)
+	}
+	if quoted == "" {
+		return "" // a reply to a bare photo/sticker/etc. — nothing to quote
+	}
+	who := "someone"
+	if rt.From != nil {
+		switch {
+		case selfID != 0 && rt.From.ID == selfID:
+			who = "you (the assistant)"
+		case rt.From.FirstName != "":
+			who = rt.From.FirstName
+		case rt.From.Username != "":
+			who = "@" + rt.From.Username
+		}
+	}
+	return fmt.Sprintf("[Replying to a message from %s:\n%s]\n\n", who, quoted)
+}
+
+// handleUnpaired issues a pairing code to an unknown sender or group.
+// This is the only reply an unpaired sender gets; it lets the owner link the chat
 // from the portal.
-func (b *Bot) handleUnpaired(ctx context.Context, externalID string, chatID int64) {
+func (b *Bot) handleUnpaired(ctx context.Context, externalID string, chatID int64, group bool) {
 	code, err := newPairingCode()
 	if err != nil {
 		b.log.Error("telegram pairing code gen", "err", err)
@@ -278,9 +403,14 @@ func (b *Bot) handleUnpaired(ctx context.Context, externalID string, chatID int6
 		b.log.Error("telegram pairing code store", "err", err)
 		return
 	}
-	b.log.Info("telegram pairing code issued", "external_id", externalID)
+	b.log.Info("telegram pairing code issued", "external_id", externalID, "group", group)
+	what := "this chat"
+	if group {
+		what = "this group"
+	}
 	_ = b.send(ctx, chatID, fmt.Sprintf(
-		"👋 To connect this chat to your assistant, log into the web portal, open the Agents page, and enter this code within 15 minutes:\n\n%s", code))
+		"👋 To connect %s to your assistant, log into the web portal, open the Agents page, and enter this code within 15 minutes:\n\n%s",
+		what, code))
 }
 
 // send delivers text as plain Telegram text (used for pairing/error/command

@@ -1,6 +1,6 @@
 package web
 
-// briefingSkillContent is the seeded morning-briefing skill (spec §7.4). It must
+// briefingSkillContent is the seeded morning-briefing skill. It must
 // degrade gracefully when the user has no external tools registered.
 const briefingSkillContent = `# Morning briefing
 

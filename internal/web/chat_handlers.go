@@ -55,7 +55,7 @@ type chatEvent struct {
 }
 
 // handleChatSend executes a turn and streams the assistant's output back as
-// newline-delimited JSON. Delivery/formatting live here (spec §4.3); the agent
+// newline-delimited JSON. Delivery/formatting live here; the agent
 // has no send tool.
 func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())

@@ -1,4 +1,4 @@
--- Generalize the audit log from tool-calls-only to an event log (spec §10.5).
+-- Generalize the audit log from tool-calls-only to an event log.
 -- event_type categorizes the row: tool | auth | message | skill | job. Existing
 -- rows were all tool calls, hence the default. tool_name now doubles as the
 -- event's action/name (the tool name, the channel, the job name, etc.).

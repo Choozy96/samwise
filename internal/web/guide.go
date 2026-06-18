@@ -27,7 +27,7 @@ func SetUserGuide(md string) {
 	guideHTML = template.HTML(buf.String())
 }
 
-// handleGuide renders the in-app user guide (spec §13).
+// handleGuide renders the in-app user guide.
 func (s *Server) handleGuide(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "guide", pageData{"Title": "Guide", "GuideHTML": guideHTML})
 }

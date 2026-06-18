@@ -1,10 +1,10 @@
 // Package store owns the SQLite database: connection setup, migrations, and
 // (in sibling files) the typed data-access layer. SQLite is embedded — a single
-// file on a named volume, no separate DB server (spec §6 DB-hosting note).
+// file on a named volume, no separate DB server.
 //
 // Every data-access method that touches user-owned rows takes a user_id from
 // the run context and filters by it; model-supplied IDs are never trusted
-// (spec §6, §9).
+//.
 package store
 
 import (

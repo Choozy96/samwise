@@ -13,11 +13,13 @@ func (db *DB) GetSettings(ctx context.Context, userID int64) (*Settings, error) 
 	err := db.QueryRowContext(ctx,
 		`SELECT user_id, timezone, active_runtime, delivery_channel, model_hints,
 		        briefing_time, restart_time, distillation_time,
-		        transcript_window_n, retrieval_k, tg_format, distill_notify
+		        transcript_window_n, retrieval_k, tg_format, distill_notify, group_reply_mode,
+		        extra_tools
 		   FROM user_settings WHERE user_id = ?`, userID).
 		Scan(&s.UserID, &s.Timezone, &s.ActiveRuntime, &s.DeliveryChannel, &s.ModelHints,
 			&s.BriefingTime, &s.RestartTime, &s.DistillationTime,
-			&s.TranscriptWindowN, &s.RetrievalK, &s.TgFormat, &distillNotify)
+			&s.TranscriptWindowN, &s.RetrievalK, &s.TgFormat, &distillNotify, &s.GroupReplyMode,
+			&s.ExtraTools)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -46,7 +48,7 @@ func (db *DB) SetOnboarded(ctx context.Context, userID int64, done bool) error {
 }
 
 // UpdateTimezone sets just the timezone (used by the set_timezone tool). The
-// scheduler layer recomputes affected jobs separately (spec §8.2).
+// scheduler layer recomputes affected jobs separately.
 func (db *DB) UpdateTimezone(ctx context.Context, userID int64, tz string) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE user_settings SET timezone = ? WHERE user_id = ?`, tz, userID)
@@ -54,17 +56,19 @@ func (db *DB) UpdateTimezone(ctx context.Context, userID int64, tz string) error
 }
 
 // UpdateSettings persists an edited settings row. Timezone changes that must
-// recompute scheduled jobs are handled by the scheduler layer (spec §8.2), not
+// recompute scheduled jobs are handled by the scheduler layer, not
 // here — this is a plain write.
 func (db *DB) UpdateSettings(ctx context.Context, s *Settings) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE user_settings SET
 		    timezone = ?, active_runtime = ?, delivery_channel = ?, model_hints = ?,
 		    briefing_time = ?, restart_time = ?, distillation_time = ?,
-		    transcript_window_n = ?, retrieval_k = ?, tg_format = ?, distill_notify = ?
+		    transcript_window_n = ?, retrieval_k = ?, tg_format = ?, distill_notify = ?,
+		    group_reply_mode = ?, extra_tools = ?
 		  WHERE user_id = ?`,
 		s.Timezone, s.ActiveRuntime, s.DeliveryChannel, s.ModelHints,
 		s.BriefingTime, s.RestartTime, s.DistillationTime,
-		s.TranscriptWindowN, s.RetrievalK, s.TgFormat, boolToInt(s.DistillNotify), s.UserID)
+		s.TranscriptWindowN, s.RetrievalK, s.TgFormat, boolToInt(s.DistillNotify),
+		s.GroupReplyMode, s.ExtraTools, s.UserID)
 	return err
 }

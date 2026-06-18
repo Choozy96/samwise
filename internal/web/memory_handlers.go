@@ -14,7 +14,7 @@ const memPageSize = 50
 // handleMemory renders the memory browser with drill-down: an index of topics
 // (semantic) and dates (episodic) — counted in SQL so they're accurate at any
 // scale — plus paginated topic/date views and full-text search. Users only ever
-// see their own memory (spec §6, §9, §12).
+// see their own memory.
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())
 	ctx := r.Context()
@@ -148,7 +148,7 @@ func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-// handleAudit renders the user's own tool-call audit log (spec §10.5, §12).
+// handleAudit renders the user's own tool-call audit log.
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())
 	entries, err := s.db.ListAudit(r.Context(), u.ID, 200)

@@ -9,7 +9,7 @@ import (
 )
 
 // runCreateUser creates a portal user from the CLI. The first account created
-// becomes admin regardless of the --admin flag (spec §9). Useful for headless
+// becomes admin regardless of the --admin flag. Useful for headless
 // provisioning / the admin appendix install flow.
 //
 //	samwise create-user --username alice --password 's3cret!!' [--admin]

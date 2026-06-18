@@ -12,7 +12,7 @@ import (
 )
 
 // runMCP runs the core MCP server over stdio, bound to the user_id/run_id the
-// orchestrator supplies at spawn time (spec §3). It is invoked by the runtime
+// orchestrator supplies at spawn time. It is invoked by the runtime
 // adapters via a generated --mcp-config, not by hand.
 //
 //	samwise mcp --db <path> --user-id <N> --run-id <M>

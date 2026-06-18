@@ -13,7 +13,7 @@ import (
 	"samwise/internal/store"
 )
 
-// Reminder tools create/list/cancel direct_message jobs (spec §8.4): a reminder
+// Reminder tools create/list/cancel direct_message jobs: a reminder
 // is a "ping me" with no agent and no tokens, distinct from a task in the user's
 // task system.
 
@@ -85,7 +85,7 @@ func (h *handlers) reminderSet(ctx context.Context, _ *mcp.CallToolRequest, in r
 		TZMode:       "user_local",
 		Payload:      string(payload),
 		Enabled:      true,
-		CatchUp:      true, // a dropped reminder is the worst failure (spec §8.3)
+		CatchUp:      true, // a dropped reminder is the worst failure
 		NextFireUTC:  next.UTC().Format(time.RFC3339),
 	})
 	if err != nil {

@@ -13,11 +13,11 @@ import (
 const backupKeep = 7
 
 // Backup writes a consistent SQLite snapshot via VACUUM INTO and prunes old
-// snapshots (spec §10.6). The snapshot is a single file safe to copy off-box;
+// snapshots. The snapshot is a single file safe to copy off-box;
 // because portal-stored secrets are encrypted at rest, the snapshot is too.
 //
 // Encrypting the archive itself (age/AES-GCM) and off-box copy are noted seams
-// (spec §10.6) — the local rotated snapshot is the MVP.
+// — the local rotated snapshot is the MVP.
 func (o *Orchestrator) Backup(ctx context.Context, now time.Time) error {
 	dir := filepath.Join(filepath.Dir(o.cfg.DBPath), "backups")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

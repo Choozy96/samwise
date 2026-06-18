@@ -1,4 +1,4 @@
-// Package orchestrator owns everything around an agent run (spec §1): context
+// Package orchestrator owns everything around an agent run: context
 // assembly, run dispatch, persistence of the transcript and run record, and
 // (for scheduled jobs) delivery. The runtime is a swappable execution engine
 // selected per user.
@@ -20,7 +20,7 @@ import (
 )
 
 // coreTools are the core MCP tool names (server "core"), pre-allowed on every
-// run so unattended runs never stall on a permission prompt (spec §10.4).
+// run so unattended runs never stall on a permission prompt.
 var coreTools = []string{
 	"mcp__core__memory_save",
 	"mcp__core__memory_search",
@@ -128,7 +128,7 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 
 	// Assemble from the transcript as it stands BEFORE this turn's message — the
 	// new message is sent as the prompt, not duplicated into the transcript.
-	// The incoming message drives memory retrieval (spec §5.5).
+	// The incoming message drives memory retrieval.
 	asm, err := o.assemble(ctx, req.User, settings, agent, conv, req.UserMessage)
 	if err != nil {
 		return nil, fmt.Errorf("assembling context: %w", err)
@@ -160,23 +160,23 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 
 	mcpJSON, allowedTools := o.buildMCP(ctx, req.User.ID, runID)
 	rreq := runtime.Request{
-		UserID:         req.User.ID,
-		RunID:          runID,
-		Prompt:         runtimePrompt,
-		SystemContext:  asm.systemContext,
-		Transcript:     asm.transcript,
-		Model:          model,
-		Workspace:      o.workspace(req.User.ID),
-		MCPConfigJSON:  mcpJSON,
-		AllowedTools:   allowedTools,
-		AllowHostTools: o.cfg.AllowAgentTools,
-		Env:            o.userSecretsEnv(ctx, req.User.ID),
+		UserID:        req.User.ID,
+		RunID:         runID,
+		Prompt:        runtimePrompt,
+		SystemContext: asm.systemContext,
+		Transcript:    asm.transcript,
+		Model:         model,
+		Workspace:     o.workspace(req.User.ID),
+		MCPConfigJSON: mcpJSON,
+		AllowedTools:  allowedTools,
+		BuiltinTools:  o.builtinTools(settings),
+		Env:           o.userSecretsEnv(ctx, req.User.ID),
 	}
 
 	res, runErr := rt.Run(ctx, rreq, onEvent)
 
 	// Persist outcome regardless of error so the transcript and runs table stay
-	// truthful (spec §11: no silent failures).
+	// truthful.
 	o.persistOutcome(ctx, conv, channel, req.User.ID, runID, res, runErr, req.Silent)
 
 	if runErr != nil {
@@ -190,11 +190,17 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 
 func (o *Orchestrator) persistOutcome(ctx context.Context, conv *store.Conversation, channel string, userID, runID int64, res *runtime.Result, runErr error, silent bool) {
 	status, errMsg := "success", ""
-	var dur int64
-	var cost float64
+	var metrics store.RunMetrics
 	if res != nil {
-		dur, cost = res.DurationMS, res.CostUSD
-		// Tool-call summaries go into the transcript (spec §5.5) so a rehydrated
+		metrics = store.RunMetrics{
+			DurationMS:          res.DurationMS,
+			CostUSD:             res.CostUSD,
+			InputTokens:         res.InputTokens,
+			OutputTokens:        res.OutputTokens,
+			CacheCreationTokens: res.CacheCreationTokens,
+			CacheReadTokens:     res.CacheReadTokens,
+		}
+		// Tool-call summaries go into the transcript so a rehydrated
 		// runtime knows which writes already happened. Silent runs skip all
 		// conversation writes but still audit tools and record the run.
 		for _, tc := range res.ToolCalls {
@@ -225,7 +231,7 @@ func (o *Orchestrator) persistOutcome(ctx context.Context, conv *store.Conversat
 	} else if res != nil && res.IsError {
 		status, errMsg = "error", res.ErrMsg
 	}
-	if err := o.db.FinishRun(ctx, runID, status, errMsg, dur, cost); err != nil {
+	if err := o.db.FinishRun(ctx, runID, status, errMsg, metrics); err != nil {
 		o.log.Error("finishing run", "err", err)
 	}
 }
@@ -282,6 +288,23 @@ func auditSnippet(s string) string {
 		return s[:max] + "…"
 	}
 	return s
+}
+
+// builtinTools decides which Claude Code built-in tools a run gets. The
+// deployment's ALLOW_AGENT_TOOLS is the master switch (off => no host tools at
+// all); on top of that the user's settings opt into individual extra tools (each
+// validated against the catalog, so only known tools can ever be enabled).
+func (o *Orchestrator) builtinTools(s *store.Settings) []string {
+	if !o.cfg.AllowAgentTools {
+		return nil
+	}
+	tools := append([]string{}, runtime.ScopedBuiltinTools...)
+	for _, name := range strings.Split(s.ExtraTools, ",") {
+		if name = strings.TrimSpace(name); name != "" && runtime.IsOptionalTool(name) {
+			tools = append(tools, name)
+		}
+	}
+	return tools
 }
 
 func (o *Orchestrator) selectRuntime(name string) runtime.AgentRuntime {

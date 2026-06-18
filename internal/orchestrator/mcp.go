@@ -19,7 +19,7 @@ type mcpSecret struct {
 
 // buildMCP assembles the --mcp-config JSON and the matching --allowedTools list
 // for a run: the core server (this binary, bound to the run context) plus every
-// enabled registry entry for the user (spec §7.3). Secrets are decrypted in
+// enabled registry entry for the user. Secrets are decrypted in
 // memory here and never written to disk in plaintext.
 func (o *Orchestrator) buildMCP(ctx context.Context, userID, runID int64) (string, []string) {
 	servers := map[string]any{}
@@ -99,7 +99,7 @@ func (o *Orchestrator) registryEntry(m store.MCPServer) (map[string]any, bool) {
 }
 
 // registryAllowed returns the --allowedTools entries for a registry server so
-// unattended runs never stall on a permission prompt (spec §10.4). If tool names
+// unattended runs never stall on a permission prompt. If tool names
 // were discovered at registration, each is allowed explicitly; otherwise a
 // server-scoped wildcard is used as a best-effort fallback.
 func registryAllowed(m store.MCPServer) []string {

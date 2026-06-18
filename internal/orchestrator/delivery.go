@@ -50,8 +50,8 @@ func (o *Orchestrator) NotifyTelegramBot(ctx context.Context, userID, botID int6
 	return o.telegram.SendBot(ctx, userID, botID, text)
 }
 
-// DeliverToUser delivers text to the user's preferred delivery channel (spec
-// §4.3). All formatting/chunking/rate-limiting for a channel lives behind its
+// DeliverToUser delivers text to the user's preferred delivery channel. All
+// formatting/chunking/rate-limiting for a channel lives behind its
 // sender; the agent has no send tool.
 func (o *Orchestrator) DeliverToUser(ctx context.Context, userID int64, text string) error {
 	s, err := o.db.GetSettings(ctx, userID)
@@ -64,7 +64,7 @@ func (o *Orchestrator) DeliverToUser(ctx context.Context, userID int64, text str
 			return nil
 		}
 		// No paired/running bot (or a transient send failure): fall through to web
-		// so a reminder is never silently dropped (spec §11).
+		// so a reminder is never silently dropped.
 		o.log.Warn("telegram delivery failed; delivering to web", "user_id", userID, "err", err)
 	}
 	// Web delivery: append to the active agent's web conversation so it shows in chat.
@@ -141,7 +141,7 @@ func (o *Orchestrator) RunAgentJob(ctx context.Context, userID int64, prompt, ag
 // RunAgentJobWithSkill is RunAgentJob with an optional skill: when skillName is
 // set and resolves, that skill's current content is loaded fresh and prepended
 // to the prompt, so editing the skill changes the job's behavior without
-// touching the job (spec §7.4 "edit the skill, not the app").
+// touching the job.
 func (o *Orchestrator) RunAgentJobWithSkill(ctx context.Context, userID int64, prompt, skillName, agentName string) (*runtime.Result, error) {
 	if skillName != "" {
 		if sk, err := o.db.GetSkillByName(ctx, userID, skillName); err == nil && sk != nil && strings.TrimSpace(sk.Content) != "" {
@@ -193,7 +193,7 @@ func (o *Orchestrator) SaveIntradayDistillation(ctx context.Context, userID int6
 
 // SaveDailyDistillation is the authoritative end-of-day pass: it re-reads the
 // whole local day's messages and writes a consolidated summary, replacing the
-// day's running note (spec §8.4).
+// day's running note.
 func (o *Orchestrator) SaveDailyDistillation(ctx context.Context, userID int64, localDate string) error {
 	settings, err := o.db.GetSettings(ctx, userID)
 	if err != nil {

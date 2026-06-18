@@ -96,7 +96,7 @@ func (s *Server) handleTelegramBotAdd(w http.ResponseWriter, r *http.Request) {
 	// Validate the token now so the user gets immediate feedback, and cache the
 	// bot's @username for display.
 	vctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	username, err := telegram.NewClient(token).GetMe(vctx)
+	_, username, err := telegram.NewClient(token).GetMe(vctx)
 	cancel()
 	if err != nil {
 		http.Redirect(w, r, "/agents?msg=bot_badtoken", http.StatusSeeOther)
@@ -146,7 +146,7 @@ func (s *Server) handleTelegramBotUpdate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		vctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		username, gerr := telegram.NewClient(token).GetMe(vctx)
+		_, username, gerr := telegram.NewClient(token).GetMe(vctx)
 		cancel()
 		if gerr != nil {
 			http.Redirect(w, r, "/agents?msg=bot_badtoken", http.StatusSeeOther)

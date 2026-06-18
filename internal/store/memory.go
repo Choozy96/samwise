@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// SemanticMemory is one discrete fact/preference/event (spec §6).
+// SemanticMemory is one discrete fact/preference/event.
 type SemanticMemory struct {
 	ID        int64
 	Topic     string
@@ -291,7 +291,7 @@ func (db *DB) ForgetEpisodic(ctx context.Context, userID, id int64) (bool, error
 
 // SearchMemory runs an FTS5 query across both memory layers, scoped to the user,
 // with optional topic and time-range filters, returning up to k ranked hits
-// (spec §6 retrieval).
+//.
 func (db *DB) SearchMemory(ctx context.Context, userID int64, query, topic, after, before string, k int) ([]MemoryHit, error) {
 	match := buildMatch(query)
 	if match == "" || k <= 0 {

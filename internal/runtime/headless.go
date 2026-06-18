@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// ClaudeHeadless runs each turn as a fresh `claude -p` process (spec §5.4). It
+// ClaudeHeadless runs each turn as a fresh `claude -p` process. It
 // is stateless-rehydrated-from-memory: the orchestrator assembles the full
 // context every run, so correctness never depends on a live session. Native
 // continuity via --resume is an optimization layered on later.
@@ -53,6 +53,12 @@ type streamLine struct {
 	Result       string  `json:"result"`
 	DurationMS   int64   `json:"duration_ms"`
 	TotalCostUSD float64 `json:"total_cost_usd"`
+	Usage        *struct {
+		InputTokens              int64 `json:"input_tokens"`
+		OutputTokens             int64 `json:"output_tokens"`
+		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	} `json:"usage"`
 }
 
 // Run spawns claude, streams events, and returns the final Result.
@@ -80,14 +86,14 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 		mcpConfig = `{"mcpServers":{}}`
 	}
 
-	// Built-in tools: disabled by default; a scoped set (Read/Bash/…) when the
-	// run allows host tools, so skills with scripts can execute. The same tool
-	// names are added to --allowedTools so unattended runs never prompt.
+	// Built-in tools: whatever the orchestrator decided for this run (base scoped
+	// set, plus any per-user opt-ins). The same names are added to --allowedTools
+	// so unattended runs never stall on a permission prompt.
 	builtinTools := ""
 	allowed := req.AllowedTools
-	if req.AllowHostTools {
-		builtinTools = strings.Join(ScopedBuiltinTools, ",")
-		allowed = append(append([]string{}, req.AllowedTools...), ScopedBuiltinTools...)
+	if len(req.BuiltinTools) > 0 {
+		builtinTools = strings.Join(req.BuiltinTools, ",")
+		allowed = append(append([]string{}, req.AllowedTools...), req.BuiltinTools...)
 	}
 
 	args := []string{
@@ -98,7 +104,7 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 		"--strict-mcp-config", // ignore the host's inherited MCP servers
 		"--mcp-config", mcpConfig,
 		// Full replacement (not append): the orchestrator owns the assistant's
-		// identity and behavior (spec §5.5), not Claude Code's default coding
+		// identity and behavior, not Claude Code's default coding
 		// persona.
 		"--system-prompt-file", sysPath,
 		"--permission-mode", "default",
@@ -116,15 +122,11 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 	cmd := exec.CommandContext(ctx, c.bin, args...)
 	cmd.Dir = req.Workspace
 	cmd.Stdin = strings.NewReader(buildPrompt(req))
-	// Inject the user's secrets as env vars (on top of the inherited environment)
-	// so skill scripts can read them without the secret touching the prompt/memory.
-	if len(req.Env) > 0 {
-		env := os.Environ()
-		for k, v := range req.Env {
-			env = append(env, k+"="+v)
-		}
-		cmd.Env = env
-	}
+	// The agent runs with the host environment minus app-level secrets, plus the
+	// user's own skill secrets. Stripping MASTER_KEY in particular means even a
+	// Bash/Read that reaches the SQLite file can't decrypt the secrets stored in
+	// it — the agent should reach data only through the core MCP tools.
+	cmd.Env = agentEnv(req.Env)
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -205,6 +207,12 @@ func (c *ClaudeHeadless) handleEvent(ev streamLine, res *Result, acc *strings.Bu
 	case "result":
 		res.DurationMS = ev.DurationMS
 		res.CostUSD = ev.TotalCostUSD
+		if ev.Usage != nil {
+			res.InputTokens = ev.Usage.InputTokens
+			res.OutputTokens = ev.Usage.OutputTokens
+			res.CacheCreationTokens = ev.Usage.CacheCreationInputTokens
+			res.CacheReadTokens = ev.Usage.CacheReadInputTokens
+		}
 		if ev.SessionID != "" {
 			res.SessionID = ev.SessionID
 		}
@@ -223,6 +231,37 @@ func (c *ClaudeHeadless) handleEvent(ev streamLine, res *Result, acc *strings.Bu
 	}
 }
 
+// sensitiveEnv are host environment variables the agent must never inherit —
+// app bootstrap secrets that have nothing to do with a run. Stripping them keeps
+// the agent's host tools (Bash/Read) from exfiltrating them or using MASTER_KEY
+// to decrypt the per-user secrets stored (encrypted) in the database.
+var sensitiveEnv = map[string]bool{
+	"MASTER_KEY":         true,
+	"SESSION_KEY":        true,
+	"TELEGRAM_BOT_TOKEN": true,
+}
+
+// agentEnv builds the child process environment: the host env with sensitiveEnv
+// stripped, plus the user's own skill secrets (which the run intends the agent's
+// scripts to read).
+func agentEnv(userSecrets map[string]string) []string {
+	env := make([]string, 0, len(os.Environ())+len(userSecrets))
+	for _, kv := range os.Environ() {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			name = kv[:i]
+		}
+		if sensitiveEnv[name] {
+			continue
+		}
+		env = append(env, kv)
+	}
+	for k, v := range userSecrets {
+		env = append(env, k+"="+v)
+	}
+	return env
+}
+
 // writeSystemFile persists the assembled context to a per-run file under the
 // workspace, returning its path and a cleanup func.
 func (c *ClaudeHeadless) writeSystemFile(req Request) (string, func(), error) {
@@ -238,7 +277,7 @@ func (c *ClaudeHeadless) writeSystemFile(req Request) (string, func(), error) {
 }
 
 // buildPrompt renders the stdin prompt: recent transcript (context) followed by
-// the new message. Stateless rehydration (spec §5.5).
+// the new message. Stateless rehydration.
 func buildPrompt(req Request) string {
 	if strings.TrimSpace(req.Transcript) == "" {
 		return req.Prompt

@@ -8,7 +8,7 @@ import (
 	"samwise/internal/auth"
 )
 
-// handleAdmin renders the admin dashboard: users + system health (spec §9, §11).
+// handleAdmin renders the admin dashboard: users + system health.
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	users, err := s.db.ListUsers(r.Context())
 	if err != nil {

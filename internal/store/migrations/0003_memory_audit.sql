@@ -1,9 +1,9 @@
--- Memory system (spec §6) + audit log (spec §10.5).
+-- Memory system + audit log.
 --
 -- Semantic = discrete facts/preferences/events. Episodic = dated distillations.
 -- Retrieval is SQLite FTS5 over both layers. A nullable embedding BLOB is
 -- present on each so sqlite-vec semantic search is a later migration-free
--- iteration (spec §14). Every row is user-scoped.
+-- iteration. Every row is user-scoped.
 
 CREATE TABLE memory_semantic (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +63,7 @@ CREATE TRIGGER memepi_ad AFTER DELETE ON memory_episodic BEGIN
     DELETE FROM memory_fts WHERE layer = 'episodic' AND ref_id = old.id;
 END;
 
--- Audit log: every core MCP tool call (spec §10.5). args_summary is a short,
+-- Audit log: every core MCP tool call. args_summary is a short,
 -- non-sensitive description — never full arguments.
 CREATE TABLE audit_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

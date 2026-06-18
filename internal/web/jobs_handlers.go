@@ -18,7 +18,7 @@ type jobView struct {
 	Summary   string
 }
 
-// handleJobs lists the user's scheduled jobs and a creation form (spec §12).
+// handleJobs lists the user's scheduled jobs and a creation form.
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())
 	jobs, err := s.db.ListJobs(r.Context(), u.ID)

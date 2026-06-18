@@ -1,4 +1,4 @@
--- Per-user (or global) skills (spec §7.1): markdown instruction files that
+-- Per-user (or global) skills: markdown instruction files that
 -- shape the assistant's behavior. Enabled skills are surfaced to the runtime;
 -- always_on skills are injected into every run's context, others are referenced
 -- by name (e.g. by a scheduled job). Mirrored to the workspace for native

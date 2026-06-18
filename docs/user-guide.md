@@ -56,6 +56,7 @@ to the assistant:
 | `/delivery [web\|telegram]` | Show or set where scheduled jobs are delivered |
 | `/status` | Show your current agent, model, timezone, delivery |
 | `/format [markdown\|html\|plain]` | Show or set how Telegram messages are formatted |
+| `/groupreply [mention\|all]` | In group chats, reply only when addressed (default) or to every message |
 | `/bots` | List your Telegram bots and their bound agents |
 | `/bind <bot-id> <agent\|none>` | Bind a Telegram bot to an agent (or unbind it) |
 | `/jobs` | List your scheduled (recurring) jobs |
@@ -63,7 +64,9 @@ to the assistant:
 | `/remind <time> <message>` | Set a reminder — `HH:MM`, `daily HH:MM`, or `YYYY-MM-DD HH:MM` |
 | `/recall <query>` | Search your memory and show matches directly |
 | `/new` | Start a fresh conversation thread (memory & history are kept) |
-| `/usage` | Recent run count and cost (24h / 7d) |
+| `/usage` | Recent runs and token usage by type — input/output/cache (24h / 7d) |
+| `/password <current> <new>` | Change your password (prefer the web portal — the message is visible to the channel) |
+| `/admin …` | **Admins only** — manage users from chat: `users`, `add <user> <pass>`, `disable <user>`, `enable <user>`, `resetpw <user> <pass>` |
 | `/refresh-claude` | Refresh & verify the Claude login — recover if its token lapsed |
 | `/help` | List the commands |
 
@@ -81,6 +84,23 @@ Chat with your assistant from Telegram, with the same memory and agents.
 
 Set **Settings → Delivery channel** to Telegram to have scheduled jobs (like the
 briefing) delivered there.
+
+### Group chats
+
+You can add a bot to a **group chat**. The group is paired as a whole (by its
+group id): the moment you add the bot it **posts a pairing code to the group**
+(or just message it if you missed it), and you redeem the code under **Agents →
+Pair a Telegram chat** like a normal pairing. After
+that, **anyone in the group** talks to *your* assistant — sharing your memory,
+skills, and context. So only add it to groups you trust. For separate memory,
+pair the group to a **different user account** instead.
+
+**Reply mode** (Settings → group reply mode, or `/groupreply`): by default the bot
+in a group replies **only when it's addressed** — an @mention, a reply to one of
+its messages, or a command. Switch to **reply to every message** if you want it to
+respond to all group chatter. "Every message" also requires turning the bot's
+Telegram **privacy mode off** in @BotFather (otherwise Telegram only delivers it
+mentions/commands/replies in the first place).
 
 ### Multiple bots, one per agent
 
@@ -239,8 +259,13 @@ something looks off. You only see your own activity.
 
 Settings are organized into tabs:
 
-- **General** — timezone, delivery channel, Telegram message format, and your
-  active access method / model.
+- **General** — timezone, delivery channel, Telegram message format, your active
+  access method / model, and **agent tools (advanced)**: the assistant always has
+  a default file/shell toolset; here you can switch on **individual** extra
+  built-in tools (e.g. `WebFetch`/`WebSearch` to read pages and search the web).
+  Each lists what it does, with a warning on the risky ones and a note on the ones
+  that do nothing here. All off by default, and only apply when the deployment has
+  agent tools enabled.
 - **Memory & context** — the **end-of-day distillation time**, whether to be
   **notified** of the daily memory note, and context tuning (transcript window,
   memory retrieval depth). See [Memory](#memory) for what these do.

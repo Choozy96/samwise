@@ -1,6 +1,6 @@
 // Package applog configures structured (JSON) logging for the orchestrator.
 //
-// Spec §11: "Structured logs (JSON) from the orchestrator." A single
+// A single
 // process-wide slog.Logger is installed as the default; callers use slog
 // directly or take a *slog.Logger from New.
 package applog

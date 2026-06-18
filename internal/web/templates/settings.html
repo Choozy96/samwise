@@ -43,6 +43,14 @@
         </div>
       </div>
       <p class="muted" style="margin-top:.5rem">How replies are formatted on <strong>Telegram</strong> (the web chat is unaffected). If Telegram rejects the markup, the message is resent as plain text so it always arrives. Scheduled output is delivered to your chosen <strong>delivery channel</strong>.</p>
+      <div class="field" style="margin-top:.5rem">
+        <label for="group_reply_mode">Group reply mode</label>
+        <select id="group_reply_mode" name="group_reply_mode">
+          <option value="mention"{{if or (eq .S.GroupReplyMode "mention") (eq .S.GroupReplyMode "")}} selected{{end}}>Only when addressed (@mention, reply, or command) — recommended</option>
+          <option value="all"{{if eq .S.GroupReplyMode "all"}} selected{{end}}>Reply to every group message</option>
+        </select>
+      </div>
+      <p class="muted">In <strong>group chats</strong>, whether the bot replies only when it's addressed or to everything. "Reply to every message" also needs the bot's Telegram <strong>privacy mode turned off</strong> in @BotFather (so it receives non-mention messages). Also settable with <code>/groupreply</code>.</p>
     </div>
 
     <div class="panel">
@@ -66,6 +74,16 @@
         </div>
       </div>
       <p class="muted" style="margin-top:.5rem">Switching takes effect on your next message — never mid-run. You can also use <code>/runtime</code> and <code>/model</code> in chat. Only Claude — SDK is wired today; channels and Codex are coming.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Agent tools (advanced)</h2>
+      <p class="muted">The assistant always has a default file/shell toolset. Below are extra built-in tools you can switch on individually — all off by default.{{if not .AgentToolsOn}} <strong>Agent tools are disabled on this deployment (<code>ALLOW_AGENT_TOOLS</code> is off), so these have no effect until an admin enables it.</strong>{{end}}</p>
+      {{range .OptionalTools}}
+      <label style="display:block; margin:.55rem 0 .1rem"><input type="checkbox" name="tool" value="{{.Name}}"{{if index $.EnabledTools .Name}} checked{{end}}> <strong>{{.Name}}</strong> — {{.Desc}}</label>
+      {{if .Danger}}<p style="margin:0 0 .4rem 1.7rem; font-size:.85rem; color:var(--danger)">⚠️ {{.Danger}}</p>{{end}}
+      {{if .Useless}}<p class="muted" style="margin:0 0 .4rem 1.7rem; font-size:.85rem">No real effect in this setup — safe to leave off.</p>{{end}}
+      {{end}}
     </div>
   </div>
 

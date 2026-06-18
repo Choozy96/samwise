@@ -120,7 +120,7 @@ func (db *DB) AddMessage(ctx context.Context, conversationID, userID int64, chan
 }
 
 // RecentMessages returns the last n messages of a conversation in chronological
-// order (oldest first), for context assembly (spec §5.5).
+// order (oldest first), for context assembly.
 func (db *DB) RecentMessages(ctx context.Context, conversationID int64, n int) ([]Message, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, role, content, channel, created_at FROM (
@@ -184,7 +184,7 @@ func (db *DB) MessagesForUserInRange(ctx context.Context, userID int64, startUTC
 }
 
 // SetConversationSession records the harness session id for native-continuity
-// reuse (spec §5.4).
+// reuse.
 func (db *DB) SetConversationSession(ctx context.Context, conversationID int64, sessionID string) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE conversations SET harness_session_id = ? WHERE id = ?`, sessionID, conversationID)

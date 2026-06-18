@@ -46,7 +46,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireAdmin is requireAuth plus an is_admin check (spec §9).
+// requireAdmin is requireAuth plus an is_admin check.
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if u := currentUser(r.Context()); u == nil || !u.IsAdmin {

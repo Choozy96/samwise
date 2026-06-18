@@ -2,7 +2,7 @@ package store
 
 import "context"
 
-// AuditEntry is one recorded event (spec §10.5). EventType categorizes it
+// AuditEntry is one recorded event. EventType categorizes it
 // (tool|auth|message|skill|job); ToolName holds the action/name for that type.
 type AuditEntry struct {
 	ID           int64

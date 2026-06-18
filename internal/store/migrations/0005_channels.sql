@@ -1,4 +1,4 @@
--- Channel identities + pairing (spec §4.1). A channel_identity links an external
+-- Channel identities + pairing. A channel_identity links an external
 -- sender (e.g. a Telegram user) to an app user. Pairing codes are short-lived,
 -- issued by the bot to an unknown sender and redeemed in the portal.
 

@@ -8,6 +8,7 @@ import (
 
 	"samwise/internal/auth"
 	"samwise/internal/orchestrator"
+	"samwise/internal/runtime"
 	"samwise/internal/schedule"
 	"samwise/internal/store"
 )
@@ -91,17 +92,26 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // settingsData assembles the template data, including the access-method/model
 // catalogs and the currently selected model id.
 func (s *Server) settingsData(st *store.Settings) pageData {
+	enabled := map[string]bool{}
+	for _, name := range strings.Split(st.ExtraTools, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			enabled[name] = true
+		}
+	}
 	return pageData{
-		"Title":        "Settings",
-		"S":            st,
-		"Runtimes":     s.orch.RuntimeChoices(),
-		"ModelOptions": s.orch.ModelChoices(),
-		"CurrentModel": orchestrator.ModelHintFor(st.ModelHints, "chat"),
+		"Title":         "Settings",
+		"S":             st,
+		"Runtimes":      s.orch.RuntimeChoices(),
+		"ModelOptions":  s.orch.ModelChoices(),
+		"CurrentModel":  orchestrator.ModelHintFor(st.ModelHints, "chat"),
+		"AgentToolsOn":  s.cfg.AllowAgentTools,
+		"OptionalTools": runtime.OptionalTools,
+		"EnabledTools":  enabled,
 	}
 }
 
 // handleSaveSettings validates and persists settings edits. A timezone change
-// must recompute the user's user_local scheduled jobs (spec §8.2); the scheduler
+// must recompute the user's user_local scheduled jobs; the scheduler
 // hook for that is added in MVP step 5 — here we persist the value.
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())
@@ -146,12 +156,22 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	st.TranscriptWindowN = n
 	st.RetrievalK = k
 	st.DistillNotify = r.FormValue("distill_notify") == "1"
+	st.GroupReplyMode = pick(r.FormValue("group_reply_mode"), []string{"mention", "all"}, st.GroupReplyMode)
+	// Collect the checked optional tools, validated against the catalog so only
+	// known tool names can ever be enabled.
+	var enabledTools []string
+	for _, name := range r.Form["tool"] {
+		if runtime.IsOptionalTool(name) {
+			enabledTools = append(enabledTools, name)
+		}
+	}
+	st.ExtraTools = strings.Join(enabledTools, ",")
 
 	if err := s.db.UpdateSettings(r.Context(), st); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	// A timezone change recomputes the user's user_local scheduled jobs (spec §8.2).
+	// A timezone change recomputes the user's user_local scheduled jobs.
 	if oldTZ != tz {
 		if err := schedule.RecomputeUserLocal(r.Context(), s.db, u.ID, time.Now()); err != nil {
 			s.log.Error("recompute jobs after tz change", "user_id", u.ID, "err", err)

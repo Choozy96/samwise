@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-// Job is a scheduled job (spec §8.1).
+// Job is a scheduled job.
 type Job struct {
 	ID              int64
 	UserID          int64

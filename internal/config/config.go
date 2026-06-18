@@ -1,6 +1,6 @@
 // Package config loads application configuration and bootstrap secrets.
 //
-// Two tiers of secrets exist (spec §10.2): bootstrap secrets live here, loaded
+// Two tiers of secrets exist: bootstrap secrets live here, loaded
 // from the environment / .env file (MASTER_KEY, SESSION_KEY, bot token). Every
 // other secret is encrypted at rest inside the SQLite DB under MASTER_KEY.
 package config
@@ -20,13 +20,13 @@ import (
 type Config struct {
 	Env       string // "dev" | "prod"
 	HTTPAddr  string // e.g. ":8080"
-	DBPath    string // path to the SQLite file (spec §6: db.path)
+	DBPath    string // path to the SQLite file
 	ClaudeBin string // path/name of the claude CLI for the headless runtime
 	LogLevel  string // debug | info | warn | error
 
 	// AllowAgentTools enables the runtime's scoped built-in tools (Read, Glob,
 	// Grep, Bash, Write, Edit) so skills with scripts can execute. Acceptable
-	// because runs are sandboxed at the container boundary (spec §5.2, §10.3).
+	// because runs are sandboxed at the container boundary.
 	// Defaults on in prod (container), off for native dev; override with
 	// ALLOW_AGENT_TOOLS.
 	AllowAgentTools bool

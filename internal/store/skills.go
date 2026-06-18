@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-// Skill is a markdown instruction file (spec §7.1). UserID == 0 means global.
+// Skill is a markdown instruction file. UserID == 0 means global.
 // HasBundle marks a skill with files (scripts/assets) on disk from a ZIP import.
 type Skill struct {
 	ID          int64

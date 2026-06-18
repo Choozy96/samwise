@@ -111,7 +111,7 @@ func (db *DB) UpdatePassword(ctx context.Context, id int64, passwordHash string)
 	return nil
 }
 
-// SetUserDisabled enables or disables an account (admin action, spec §9).
+// SetUserDisabled enables or disables an account (admin action).
 func (db *DB) SetUserDisabled(ctx context.Context, id int64, disabled bool) error {
 	_, err := db.ExecContext(ctx, `UPDATE users SET disabled = ? WHERE id = ?`,
 		boolToInt(disabled), id)

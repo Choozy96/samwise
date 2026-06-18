@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-// Agent is a named persona (spec: multi-agent setup). Soul is the agent's system
+// Agent is a named persona (multi-agent setup). Soul is the agent's system
 // prompt; empty falls back to the base assistant prompt. Model/Runtime are
 // optional per-agent overrides.
 type Agent struct {
