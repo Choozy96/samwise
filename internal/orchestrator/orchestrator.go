@@ -160,17 +160,17 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 
 	mcpJSON, allowedTools := o.buildMCP(ctx, req.User.ID, runID)
 	rreq := runtime.Request{
-		UserID:         req.User.ID,
-		RunID:          runID,
-		Prompt:         runtimePrompt,
-		SystemContext:  asm.systemContext,
-		Transcript:     asm.transcript,
-		Model:          model,
-		Workspace:      o.workspace(req.User.ID),
-		MCPConfigJSON:  mcpJSON,
-		AllowedTools:   allowedTools,
-		AllowHostTools: o.cfg.AllowAgentTools,
-		Env:            o.userSecretsEnv(ctx, req.User.ID),
+		UserID:        req.User.ID,
+		RunID:         runID,
+		Prompt:        runtimePrompt,
+		SystemContext: asm.systemContext,
+		Transcript:    asm.transcript,
+		Model:         model,
+		Workspace:     o.workspace(req.User.ID),
+		MCPConfigJSON: mcpJSON,
+		AllowedTools:  allowedTools,
+		BuiltinTools:  o.builtinTools(settings),
+		Env:           o.userSecretsEnv(ctx, req.User.ID),
 	}
 
 	res, runErr := rt.Run(ctx, rreq, onEvent)
@@ -190,10 +190,16 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 
 func (o *Orchestrator) persistOutcome(ctx context.Context, conv *store.Conversation, channel string, userID, runID int64, res *runtime.Result, runErr error, silent bool) {
 	status, errMsg := "success", ""
-	var dur int64
-	var cost float64
+	var metrics store.RunMetrics
 	if res != nil {
-		dur, cost = res.DurationMS, res.CostUSD
+		metrics = store.RunMetrics{
+			DurationMS:          res.DurationMS,
+			CostUSD:             res.CostUSD,
+			InputTokens:         res.InputTokens,
+			OutputTokens:        res.OutputTokens,
+			CacheCreationTokens: res.CacheCreationTokens,
+			CacheReadTokens:     res.CacheReadTokens,
+		}
 		// Tool-call summaries go into the transcript (spec §5.5) so a rehydrated
 		// runtime knows which writes already happened. Silent runs skip all
 		// conversation writes but still audit tools and record the run.
@@ -225,7 +231,7 @@ func (o *Orchestrator) persistOutcome(ctx context.Context, conv *store.Conversat
 	} else if res != nil && res.IsError {
 		status, errMsg = "error", res.ErrMsg
 	}
-	if err := o.db.FinishRun(ctx, runID, status, errMsg, dur, cost); err != nil {
+	if err := o.db.FinishRun(ctx, runID, status, errMsg, metrics); err != nil {
 		o.log.Error("finishing run", "err", err)
 	}
 }
@@ -282,6 +288,23 @@ func auditSnippet(s string) string {
 		return s[:max] + "…"
 	}
 	return s
+}
+
+// builtinTools decides which Claude Code built-in tools a run gets. The
+// deployment's ALLOW_AGENT_TOOLS is the master switch (off => no host tools at
+// all); on top of that the user's settings opt into individual extra tools (each
+// validated against the catalog, so only known tools can ever be enabled).
+func (o *Orchestrator) builtinTools(s *store.Settings) []string {
+	if !o.cfg.AllowAgentTools {
+		return nil
+	}
+	tools := append([]string{}, runtime.ScopedBuiltinTools...)
+	for _, name := range strings.Split(s.ExtraTools, ",") {
+		if name = strings.TrimSpace(name); name != "" && runtime.IsOptionalTool(name) {
+			tools = append(tools, name)
+		}
+	}
+	return tools
 }
 
 func (o *Orchestrator) selectRuntime(name string) runtime.AgentRuntime {

@@ -29,4 +29,6 @@ type Settings struct {
 	RetrievalK        int
 	TgFormat          string // markdown | html | plain (how Telegram messages are formatted)
 	DistillNotify     bool   // send a message after end-of-day distillation (default true)
+	GroupReplyMode    string // mention | all — when the bot replies in a group (default mention)
+	ExtraTools        string // comma-separated opt-in built-in tool names beyond the scoped set
 }

@@ -67,7 +67,8 @@ type memorySearchIn struct {
 }
 
 type memoryForgetIn struct {
-	ID int64 `json:"id" jsonschema:"the id of the memory row to delete"`
+	ID    int64  `json:"id" jsonschema:"the id of the memory row to delete (from memory_search)"`
+	Layer string `json:"layer,omitempty" jsonschema:"which layer the id is in: 'semantic' (a fact/preference) or 'episodic' (a dated daily note); omit to try both"`
 }
 
 type setTimezoneIn struct {
@@ -89,7 +90,7 @@ func (h *handlers) register(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "memory_forget",
-		Description: "Delete a memory entry by id (e.g. when the user says it's wrong or no longer true).",
+		Description: "Delete a memory entry by id (a fact/preference or a dated daily note) when the user says it's wrong or no longer true. Use the id and layer shown by memory_search.",
 	}, h.memoryForget)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -140,16 +141,33 @@ func (h *handlers) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, in 
 	var b strings.Builder
 	for _, hit := range hits {
 		if hit.Layer == "episodic" {
-			fmt.Fprintf(&b, "- [%s %s] %s\n", hit.Kind, hit.TS, hit.Content)
+			fmt.Fprintf(&b, "- (id=%d, layer=episodic, %s) %s\n", hit.RefID, hit.TS, hit.Content)
 		} else {
-			fmt.Fprintf(&b, "- (id=%d, %s, topic=%s) %s\n", hit.RefID, hit.Kind, hit.Topic, hit.Content)
+			fmt.Fprintf(&b, "- (id=%d, layer=semantic, %s, topic=%s) %s\n", hit.RefID, hit.Kind, hit.Topic, hit.Content)
 		}
 	}
 	return textResult(strings.TrimRight(b.String(), "\n")), nil, nil
 }
 
 func (h *handlers) memoryForget(ctx context.Context, _ *mcp.CallToolRequest, in memoryForgetIn) (*mcp.CallToolResult, any, error) {
-	ok, err := h.db.ForgetSemantic(ctx, h.userID, in.ID)
+	// Semantic and episodic ids live in separate tables. Honor an explicit layer;
+	// if none is given, try semantic first, then episodic.
+	layer := strings.ToLower(strings.TrimSpace(in.Layer))
+	var ok bool
+	var err error
+	switch layer {
+	case "episodic", "daily", "day":
+		ok, err = h.db.ForgetEpisodic(ctx, h.userID, in.ID)
+		layer = "episodic"
+	case "semantic", "fact", "preference", "event":
+		ok, err = h.db.ForgetSemantic(ctx, h.userID, in.ID)
+		layer = "semantic"
+	default:
+		if ok, err = h.db.ForgetSemantic(ctx, h.userID, in.ID); err == nil && !ok {
+			ok, err = h.db.ForgetEpisodic(ctx, h.userID, in.ID)
+		}
+		layer = "memory"
+	}
 	if err != nil {
 		return h.fail("memory_forget", fmt.Sprintf("id=%d", in.ID), err.Error()), nil, nil
 	}
@@ -157,9 +175,9 @@ func (h *handlers) memoryForget(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if !ok {
 		status = "not_found"
 	}
-	h.audit("memory_forget", fmt.Sprintf("id=%d", in.ID), status)
+	h.audit("memory_forget", fmt.Sprintf("id=%d layer=%s", in.ID, layer), status)
 	if !ok {
-		return textResult(fmt.Sprintf("No memory with id=%d.", in.ID)), nil, nil
+		return textResult(fmt.Sprintf("No %s entry with id=%d.", layer, in.ID)), nil, nil
 	}
 	return textResult(fmt.Sprintf("Deleted memory id=%d.", in.ID)), nil, nil
 }
@@ -199,11 +217,11 @@ func (h *handlers) getSettings(ctx context.Context, _ *mcp.CallToolRequest, _ em
 	}
 	h.audit("get_settings", "", "ok")
 	out := map[string]any{
-		"timezone":         s.Timezone,
-		"local_time":       localNow(s.Timezone),
-		"delivery_channel": s.DeliveryChannel,
-		"active_runtime":   s.ActiveRuntime,
-		"briefing_time":    s.BriefingTime,
+		"timezone":          s.Timezone,
+		"local_time":        localNow(s.Timezone),
+		"delivery_channel":  s.DeliveryChannel,
+		"active_runtime":    s.ActiveRuntime,
+		"distillation_time": s.DistillationTime,
 	}
 	js, _ := json.MarshalIndent(out, "", "  ")
 	return textResult(string(js)), nil, nil

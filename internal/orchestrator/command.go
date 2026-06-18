@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"samwise/internal/auth"
 	"samwise/internal/schedule"
 	"samwise/internal/store"
 )
@@ -42,6 +43,8 @@ func (o *Orchestrator) TryCommand(ctx context.Context, userID int64, msg string)
 		return msg, true
 	case "/format", "/formatting":
 		return o.cmdFormat(ctx, userID, arg), true
+	case "/groupreply", "/groupmode":
+		return o.cmdGroupReply(ctx, userID, arg), true
 	case "/timezone", "/tz":
 		return o.cmdTimezone(ctx, userID, arg), true
 	case "/delivery":
@@ -62,6 +65,10 @@ func (o *Orchestrator) TryCommand(ctx context.Context, userID int64, msg string)
 		return o.cmdBots(ctx, userID), true
 	case "/bind":
 		return o.cmdBind(ctx, userID, arg), true
+	case "/password", "/passwd":
+		return o.cmdPassword(ctx, userID, arg), true
+	case "/admin", "/users":
+		return o.cmdAdmin(ctx, userID, arg), true
 	default:
 		return "", false
 	}
@@ -96,6 +103,34 @@ func (o *Orchestrator) cmdFormat(ctx context.Context, userID int64, arg string) 
 		return "Couldn't save that."
 	}
 	return "Telegram message format set to " + s.TgFormat + " — applies to your next message."
+}
+
+// cmdGroupReply shows or sets how the bot replies in group chats.
+func (o *Orchestrator) cmdGroupReply(ctx context.Context, userID int64, arg string) string {
+	s, err := o.db.GetSettings(ctx, userID)
+	if err != nil {
+		return "Couldn't read your settings."
+	}
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "":
+		cur := s.GroupReplyMode
+		if cur == "" {
+			cur = "mention"
+		}
+		return fmt.Sprintf("Group reply mode: %s.\nSet with /groupreply <mention|all>.\n"+
+			"• mention — reply only when the bot is @mentioned, replied to, or sent a command (default)\n"+
+			"• all — reply to every group message (also needs the bot's Telegram privacy mode turned off in @BotFather)", cur)
+	case "mention", "mentioned", "mentions":
+		s.GroupReplyMode = "mention"
+	case "all", "everything", "any":
+		s.GroupReplyMode = "all"
+	default:
+		return "Unknown mode. Use: /groupreply mention  or  /groupreply all."
+	}
+	if err := o.db.UpdateSettings(ctx, s); err != nil {
+		return "Couldn't save that."
+	}
+	return "Group reply mode set to " + s.GroupReplyMode + "."
 }
 
 // cmdTimezone shows or sets the user's timezone (and recomputes local schedules).
@@ -230,15 +265,36 @@ func (o *Orchestrator) cmdNew(ctx context.Context, userID int64) string {
 	return "🆕 Started a fresh conversation — earlier context is cleared (your memory and history are kept)."
 }
 
-// cmdUsage summarizes recent run counts and cost.
+// cmdUsage summarizes recent run counts and token usage by type. Tokens are the
+// tracked metric (portable across models and pricing); dollar cost isn't shown.
 func (o *Orchestrator) cmdUsage(ctx context.Context, userID int64) string {
 	now := time.Now().UTC()
 	const f = "2006-01-02 15:04:05"
 	day, _ := o.db.UsageSince(ctx, userID, now.Add(-24*time.Hour).Format(f))
 	week, _ := o.db.UsageSince(ctx, userID, now.Add(-7*24*time.Hour).Format(f))
-	return fmt.Sprintf("Usage (runs · cost — cost is $0 on a subscription login):\n"+
-		"• last 24h: %d runs, $%.2f%s\n• last 7d: %d runs, $%.2f",
-		day.Runs, day.CostUSD, errSuffix(day.Errors), week.Runs, week.CostUSD)
+	return "Token usage (input · output · cache-write · cache-read):\n" +
+		"• last 24h: " + fmtUsage(day) + "\n" +
+		"• last 7d: " + fmtUsage(week)
+}
+
+// fmtUsage renders one usage window as runs + tokens by type.
+func fmtUsage(u store.Usage) string {
+	return fmt.Sprintf("%d runs%s — in %s · out %s · cache-write %s · cache-read %s",
+		u.Runs, errSuffix(u.Errors),
+		fmtTokens(u.InputTokens), fmtTokens(u.OutputTokens),
+		fmtTokens(u.CacheCreationTokens), fmtTokens(u.CacheReadTokens))
+}
+
+// fmtTokens renders a token count compactly (e.g. 1.2k, 3.4M).
+func fmtTokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1e3)
+	default:
+		return strconv.FormatInt(n, 10)
+	}
 }
 
 // cmdRemind sets a reminder. Time forms: 'HH:MM' (today/tomorrow), 'daily HH:MM',
@@ -296,6 +352,182 @@ func (o *Orchestrator) cmdRemind(ctx context.Context, userID int64, arg string) 
 		return "Couldn't set the reminder."
 	}
 	return fmt.Sprintf("⏰ Reminder #%d set for %s: %s", id, next.In(loc).Format("Mon 2006-01-02 15:04"), msg)
+}
+
+// cmdPassword changes the signed-in user's password from chat. The command
+// message is never stored in the transcript (slash commands are intercepted
+// before dispatch) and the values are never logged — but it still travels over
+// the channel, so the reply warns the user to delete it (especially on Telegram).
+func (o *Orchestrator) cmdPassword(ctx context.Context, userID int64, arg string) string {
+	fields := strings.Fields(arg)
+	if len(fields) != 2 {
+		return "Usage: /password <current> <new> (new ≥ 8 chars).\n" +
+			"⚠️ Your message contains your password and travels over this channel — on Telegram it passes through Telegram's servers. Prefer the web portal (Settings → Account); if you use this, delete the message right after."
+	}
+	current, next := fields[0], fields[1]
+	user, err := o.db.GetUserByID(ctx, userID)
+	if err != nil {
+		return "Couldn't load your account."
+	}
+	if err := auth.VerifyPassword(current, user.PasswordHash); err != nil {
+		_ = o.db.AddAuditEvent(ctx, userID, 0, "auth", "password_change", "via chat command", "denied")
+		return "Current password is incorrect."
+	}
+	if len(next) < 8 {
+		return "New password must be at least 8 characters."
+	}
+	if next == current {
+		return "New password must differ from the current one."
+	}
+	hash, err := auth.HashPassword(next)
+	if err != nil {
+		return "Couldn't update the password."
+	}
+	if err := o.db.UpdatePassword(ctx, userID, hash); err != nil {
+		return "Couldn't update the password."
+	}
+	_ = o.db.AddAuditEvent(ctx, userID, 0, "auth", "password_change", "via chat command", "ok")
+	return "✅ Password changed.\n⚠️ Delete your message above — it contains your old and new passwords."
+}
+
+const adminHelp = "Admin commands (admins only):\n" +
+	"• /admin users — list all users\n" +
+	"• /admin add <username> <password> — create a user\n" +
+	"• /admin disable <username> — disable a user\n" +
+	"• /admin enable <username> — re-enable a user\n" +
+	"• /admin resetpw <username> <new-password> — reset a user's password\n" +
+	"⚠️ Subcommands with a password expose it to this channel — prefer the web Admin page and delete the message after."
+
+// cmdAdmin handles admin-only user management. The calling user must be an admin;
+// it mirrors the web Admin page guards (non-admin targets only for disable/reset,
+// length/dup checks on create).
+func (o *Orchestrator) cmdAdmin(ctx context.Context, userID int64, arg string) string {
+	caller, err := o.db.GetUserByID(ctx, userID)
+	if err != nil {
+		return "Couldn't verify your account."
+	}
+	if !caller.IsAdmin {
+		return "That command is for admins only."
+	}
+	fields := strings.Fields(arg)
+	if len(fields) == 0 {
+		return adminHelp
+	}
+	sub := strings.ToLower(fields[0])
+	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(arg), fields[0]))
+	switch sub {
+	case "help":
+		return adminHelp
+	case "users", "list", "ls":
+		return o.adminListUsers(ctx)
+	case "add", "adduser", "create":
+		return o.adminAddUser(ctx, rest)
+	case "disable":
+		return o.adminSetDisabled(ctx, rest, true)
+	case "enable":
+		return o.adminSetDisabled(ctx, rest, false)
+	case "resetpw", "resetpassword":
+		return o.adminResetPw(ctx, rest)
+	default:
+		return "Unknown admin subcommand. Try /admin help."
+	}
+}
+
+func (o *Orchestrator) adminListUsers(ctx context.Context) string {
+	users, err := o.db.ListUsers(ctx)
+	if err != nil {
+		return "Couldn't list users."
+	}
+	var b strings.Builder
+	b.WriteString("Users:\n")
+	for _, u := range users {
+		tags := ""
+		if u.IsAdmin {
+			tags += " [admin]"
+		}
+		if u.Disabled {
+			tags += " [disabled]"
+		}
+		fmt.Fprintf(&b, "• #%d %s%s\n", u.ID, u.Username, tags)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (o *Orchestrator) adminAddUser(ctx context.Context, rest string) string {
+	f := strings.Fields(rest)
+	if len(f) != 2 {
+		return "Usage: /admin add <username> <password> (username ≥ 3, password ≥ 8). ⚠️ The password is visible to this channel."
+	}
+	username, password := f[0], f[1]
+	if len(username) < 3 {
+		return "Username must be at least 3 characters."
+	}
+	if len(password) < 8 {
+		return "Password must be at least 8 characters."
+	}
+	if existing, _ := o.db.GetUserByUsername(ctx, username); existing != nil {
+		return fmt.Sprintf("Username %q is already taken.", username)
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return "Couldn't create the user."
+	}
+	id, err := o.db.CreateUser(ctx, username, hash, false)
+	if err != nil {
+		return "Couldn't create the user."
+	}
+	_ = o.db.AddAuditEvent(ctx, id, 0, "auth", "user_create", "by admin (command)", "ok")
+	return fmt.Sprintf("✅ Created user #%d %q.\n⚠️ Delete the message above — it contains the password.", id, username)
+}
+
+func (o *Orchestrator) adminSetDisabled(ctx context.Context, rest string, disabled bool) string {
+	username := strings.TrimSpace(rest)
+	if username == "" {
+		return "Usage: /admin disable <username>  (or /admin enable <username>)."
+	}
+	target, err := o.db.GetUserByUsername(ctx, username)
+	if err != nil || target == nil {
+		return fmt.Sprintf("No user named %q.", username)
+	}
+	if target.IsAdmin {
+		return "Admin accounts can't be disabled."
+	}
+	if err := o.db.SetUserDisabled(ctx, target.ID, disabled); err != nil {
+		return "Couldn't update the user."
+	}
+	action := "enabled"
+	if disabled {
+		action = "disabled"
+	}
+	_ = o.db.AddAuditEvent(ctx, target.ID, 0, "auth", "user_"+action, "by admin (command)", "ok")
+	return fmt.Sprintf("✅ User %q %s.", username, action)
+}
+
+func (o *Orchestrator) adminResetPw(ctx context.Context, rest string) string {
+	f := strings.Fields(rest)
+	if len(f) != 2 {
+		return "Usage: /admin resetpw <username> <new-password> (≥ 8). ⚠️ The password is visible to this channel."
+	}
+	username, password := f[0], f[1]
+	if len(password) < 8 {
+		return "New password must be at least 8 characters."
+	}
+	target, err := o.db.GetUserByUsername(ctx, username)
+	if err != nil || target == nil {
+		return fmt.Sprintf("No user named %q.", username)
+	}
+	if target.IsAdmin {
+		return "Admins change their own password with /password or in Settings."
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return "Couldn't reset the password."
+	}
+	if err := o.db.UpdatePassword(ctx, target.ID, hash); err != nil {
+		return "Couldn't reset the password."
+	}
+	_ = o.db.AddAuditEvent(ctx, target.ID, 0, "auth", "password_reset", "by admin (command)", "ok")
+	return fmt.Sprintf("✅ Reset password for %q — give them the new one.\n⚠️ Delete the message above.", username)
 }
 
 // ── command helpers ─────────────────────────────────────────────────────────
@@ -410,6 +642,7 @@ func helpText() string {
 		"• /timezone [IANA] — show or set your timezone (e.g. Asia/Singapore)",
 		"• /delivery [web|telegram] — where scheduled jobs are delivered",
 		"• /format [markdown|html|plain] — how Telegram messages are formatted",
+		"• /groupreply [mention|all] — in groups, reply only when addressed (default) or to every message",
 		"• /bots — list your Telegram bots and their bound agents",
 		"• /bind <bot-id> <agent|none> — bind a Telegram bot to an agent",
 		"• /jobs — list your scheduled jobs",
@@ -417,7 +650,9 @@ func helpText() string {
 		"• /remind <time> <message> — set a reminder (HH:MM, 'daily HH:MM', or 'YYYY-MM-DD HH:MM')",
 		"• /recall <query> — search your memory",
 		"• /new — start a fresh conversation (keeps memory & history)",
-		"• /usage — recent run/cost summary",
+		"• /usage — recent runs and token usage by type",
+		"• /password <current> <new> — change your password (prefer the web portal; the message is exposed on the channel)",
+		"• /admin — (admins) manage users — e.g. /admin add <username> <password>; type /admin for the full list (users/add/disable/enable/resetpw)",
 		"• /refresh-claude — refresh & verify the Claude login (recover if its token lapsed)",
 		"• /help — this list",
 		"Anything not starting with one of these is sent to your assistant as usual.",

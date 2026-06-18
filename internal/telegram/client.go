@@ -29,10 +29,25 @@ func NewClient(token string) *Client {
 	}
 }
 
-// Update is a Telegram update (subset).
+// Update is a Telegram update (subset). MyChatMember fires when the bot's own
+// membership changes — e.g. it's added to a group.
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID     int64             `json:"update_id"`
+	Message      *Message          `json:"message"`
+	MyChatMember *ChatMemberUpdate `json:"my_chat_member"`
+}
+
+// ChatMemberUpdate reports a change to the bot's membership in a chat.
+type ChatMemberUpdate struct {
+	Chat          *Chat       `json:"chat"`
+	From          *User       `json:"from"`
+	NewChatMember *ChatMember `json:"new_chat_member"`
+}
+
+// ChatMember is the bot's membership state in a chat (subset). Status is
+// "member"/"administrator" when present, "left"/"kicked" when not.
+type ChatMember struct {
+	Status string `json:"status"`
 }
 
 // Message is a Telegram message (subset). A message carries either Text, or a
@@ -52,6 +67,9 @@ type Message struct {
 	Audio     *Document   `json:"audio"`
 	VideoNote *Document   `json:"video_note"`
 	Sticker   *Sticker    `json:"sticker"`
+	// ReplyToMessage is set when this message replies to another — used to detect
+	// a reply directed at the bot in a group.
+	ReplyToMessage *Message `json:"reply_to_message"`
 }
 
 // Sticker is a Telegram sticker. Static stickers are WEBP (viewable as an image);
@@ -84,40 +102,46 @@ type PhotoSize struct {
 
 // User is a Telegram user (subset).
 type User struct {
-	ID int64 `json:"id"`
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username"`
 }
 
-// Chat is a Telegram chat (subset).
+// Chat is a Telegram chat (subset). Type is "private" for a 1:1 DM or
+// "group"/"supergroup" for a group chat.
 type Chat struct {
-	ID int64 `json:"id"`
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
 }
 
-// GetMe calls getMe to verify the token and return the bot's @username — used
-// when a bot is registered to validate the token and cache its handle.
-func (c *Client) GetMe(ctx context.Context) (username string, err error) {
+// GetMe calls getMe to verify the token and return the bot's id and @username —
+// used to validate a registered bot, cache its handle, and detect @mentions /
+// replies addressed to it in groups.
+func (c *Client) GetMe(ctx context.Context) (id int64, username string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base()+"/getMe", nil)
 	if err != nil {
-		return "", err
+		return 0, "", err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", err
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 	var out struct {
 		OK          bool   `json:"ok"`
 		Description string `json:"description"`
 		Result      struct {
+			ID       int64  `json:"id"`
 			Username string `json:"username"`
 		} `json:"result"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		return 0, "", err
 	}
 	if !out.OK {
-		return "", fmt.Errorf("telegram getMe: %s", out.Description)
+		return 0, "", fmt.Errorf("telegram getMe: %s", out.Description)
 	}
-	return out.Result.Username, nil
+	return out.Result.ID, out.Result.Username, nil
 }
 
 // GetUpdates long-polls for updates after offset.

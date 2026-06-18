@@ -13,11 +13,13 @@ func (db *DB) GetSettings(ctx context.Context, userID int64) (*Settings, error) 
 	err := db.QueryRowContext(ctx,
 		`SELECT user_id, timezone, active_runtime, delivery_channel, model_hints,
 		        briefing_time, restart_time, distillation_time,
-		        transcript_window_n, retrieval_k, tg_format, distill_notify
+		        transcript_window_n, retrieval_k, tg_format, distill_notify, group_reply_mode,
+		        extra_tools
 		   FROM user_settings WHERE user_id = ?`, userID).
 		Scan(&s.UserID, &s.Timezone, &s.ActiveRuntime, &s.DeliveryChannel, &s.ModelHints,
 			&s.BriefingTime, &s.RestartTime, &s.DistillationTime,
-			&s.TranscriptWindowN, &s.RetrievalK, &s.TgFormat, &distillNotify)
+			&s.TranscriptWindowN, &s.RetrievalK, &s.TgFormat, &distillNotify, &s.GroupReplyMode,
+			&s.ExtraTools)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -61,10 +63,12 @@ func (db *DB) UpdateSettings(ctx context.Context, s *Settings) error {
 		`UPDATE user_settings SET
 		    timezone = ?, active_runtime = ?, delivery_channel = ?, model_hints = ?,
 		    briefing_time = ?, restart_time = ?, distillation_time = ?,
-		    transcript_window_n = ?, retrieval_k = ?, tg_format = ?, distill_notify = ?
+		    transcript_window_n = ?, retrieval_k = ?, tg_format = ?, distill_notify = ?,
+		    group_reply_mode = ?, extra_tools = ?
 		  WHERE user_id = ?`,
 		s.Timezone, s.ActiveRuntime, s.DeliveryChannel, s.ModelHints,
 		s.BriefingTime, s.RestartTime, s.DistillationTime,
-		s.TranscriptWindowN, s.RetrievalK, s.TgFormat, boolToInt(s.DistillNotify), s.UserID)
+		s.TranscriptWindowN, s.RetrievalK, s.TgFormat, boolToInt(s.DistillNotify),
+		s.GroupReplyMode, s.ExtraTools, s.UserID)
 	return err
 }

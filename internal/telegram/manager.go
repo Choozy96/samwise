@@ -132,18 +132,23 @@ func (m *Manager) reconcile(ctx context.Context) {
 // caches the bot's @username via getMe (best-effort) so the portal can show it.
 func (m *Manager) start(ctx context.Context, botID int64, d desiredBot) {
 	client := NewClient(d.token)
-	if d.bot != nil {
-		mc, cancel := context.WithTimeout(ctx, 10*time.Second)
-		if uname, err := client.GetMe(mc); err != nil {
-			m.log.Warn("telegram manager: getMe failed (token may be invalid)", "bot_id", botID, "err", err)
-		} else if uname != d.bot.Username {
+	// getMe validates the token and yields the bot's id + @username, needed to
+	// detect group @mentions/replies (and to cache the handle for DB bots).
+	var selfID int64
+	var username string
+	mc, cancel := context.WithTimeout(ctx, 10*time.Second)
+	if id, uname, err := client.GetMe(mc); err != nil {
+		m.log.Warn("telegram manager: getMe failed (token may be invalid)", "bot_id", botID, "err", err)
+	} else {
+		selfID, username = id, uname
+		if d.bot != nil && uname != d.bot.Username {
 			_ = m.db.SetTelegramBotUsername(ctx, botID, uname)
 		}
-		cancel()
 	}
+	cancel()
 
 	bctx, cancel := context.WithCancel(ctx)
-	bot := NewBot(client, m.db, m.orch, m.log, botID, d.agentID)
+	bot := NewBot(client, m.db, m.orch, m.log, botID, d.agentID, selfID, username)
 	m.mu.Lock()
 	m.running[botID] = &botHandle{client: client, cancel: cancel, fingerprint: d.fingerprint}
 	m.mu.Unlock()

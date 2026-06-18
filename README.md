@@ -10,7 +10,7 @@ briefings) are delivered through a user **extension system**, not core code.
 
 > The Go module, binary, and Docker image are named `samwise`.
 
-**Docs:** [Deploy & operate](docs/DEPLOY.md) · [User guide](docs/user-guide.md) (also in-app under **Guide**) · [Progress / roadmap](PROGRESS.md)
+**Docs:** [Deploy & operate](docs/DEPLOY.md) · [User guide](docs/user-guide.md) (also in-app under **Guide**) · [Security model](SECURITY.md)
 
 > **Status:** MVP complete (spec steps 1–6) — a useful single-user assistant.
 > The channels runtime, codex-exec, per-user containers, and the reference
