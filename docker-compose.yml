@@ -1,9 +1,9 @@
-# Main orchestrator container (spec step 1 deliverable).
+# Main orchestrator container.
 #
 # SQLite is embedded in the orchestrator — there is NO separate database
 # container. Data durability comes from the named volume `app-data` mounted at
 # /data, which holds the SQLite file (and later, extensions/backups). Per-user
-# session containers are a later step (spec §8); this compose runs the single
+# session containers are a later step; this compose runs the single
 # main container only.
 
 services:
@@ -67,7 +67,7 @@ services:
 
 # Single bridge network for now. Egress is unrestricted by default for
 # usability (agents fetch the web); restricting it later is a config change
-# here (spec §10.3), e.g. `internal: true` plus an egress proxy.
+# here, e.g. `internal: true` plus an egress proxy.
 networks:
   appnet:
     driver: bridge

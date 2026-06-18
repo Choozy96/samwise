@@ -1,4 +1,4 @@
-// Package orchestrator owns everything around an agent run (spec §1): context
+// Package orchestrator owns everything around an agent run: context
 // assembly, run dispatch, persistence of the transcript and run record, and
 // (for scheduled jobs) delivery. The runtime is a swappable execution engine
 // selected per user.
@@ -20,7 +20,7 @@ import (
 )
 
 // coreTools are the core MCP tool names (server "core"), pre-allowed on every
-// run so unattended runs never stall on a permission prompt (spec §10.4).
+// run so unattended runs never stall on a permission prompt.
 var coreTools = []string{
 	"mcp__core__memory_save",
 	"mcp__core__memory_search",
@@ -128,7 +128,7 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 
 	// Assemble from the transcript as it stands BEFORE this turn's message — the
 	// new message is sent as the prompt, not duplicated into the transcript.
-	// The incoming message drives memory retrieval (spec §5.5).
+	// The incoming message drives memory retrieval.
 	asm, err := o.assemble(ctx, req.User, settings, agent, conv, req.UserMessage)
 	if err != nil {
 		return nil, fmt.Errorf("assembling context: %w", err)
@@ -176,7 +176,7 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 	res, runErr := rt.Run(ctx, rreq, onEvent)
 
 	// Persist outcome regardless of error so the transcript and runs table stay
-	// truthful (spec §11: no silent failures).
+	// truthful.
 	o.persistOutcome(ctx, conv, channel, req.User.ID, runID, res, runErr, req.Silent)
 
 	if runErr != nil {
@@ -200,7 +200,7 @@ func (o *Orchestrator) persistOutcome(ctx context.Context, conv *store.Conversat
 			CacheCreationTokens: res.CacheCreationTokens,
 			CacheReadTokens:     res.CacheReadTokens,
 		}
-		// Tool-call summaries go into the transcript (spec §5.5) so a rehydrated
+		// Tool-call summaries go into the transcript so a rehydrated
 		// runtime knows which writes already happened. Silent runs skip all
 		// conversation writes but still audit tools and record the run.
 		for _, tc := range res.ToolCalls {

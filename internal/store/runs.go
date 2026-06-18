@@ -2,8 +2,7 @@ package store
 
 import "context"
 
-// Run records one agent execution (spec §11: runs table records runtime, model,
-// status, duration, error per run). Token usage is tracked by type; cost_usd is
+// Run records one agent execution. Token usage is tracked by type; cost_usd is
 // stored for reference but isn't the primary metric.
 type Run struct {
 	ID                  int64

@@ -1,4 +1,4 @@
-// Package runtime is the agent-runtime adapter layer (spec §5). One interface,
+// Package runtime is the agent-runtime adapter layer. One interface,
 // AgentRuntime, hides whether a run is served by claude-headless, claude-channels,
 // or codex-exec. The orchestrator assembles context and dispatches; the adapter
 // executes and emits a stream of events.
@@ -11,7 +11,7 @@ import "context"
 
 // ScopedBuiltinTools is the safe default set of Claude Code built-in tools (file
 // + shell) enabled when a run allows host tools, so skills with scripts/assets
-// can execute. Sandboxing is at the container boundary (spec §5.2).
+// can execute. Sandboxing is at the container boundary.
 var ScopedBuiltinTools = []string{"Read", "Glob", "Grep", "Bash", "Write", "Edit"}
 
 // OptionalTool is a Claude Code built-in a user can opt into (per tool) beyond
@@ -51,13 +51,13 @@ func IsOptionalTool(name string) bool {
 	return false
 }
 
-// EventKind enumerates the streamed run events (spec §5.1 RunEvent).
+// EventKind enumerates the streamed run events.
 type EventKind int
 
 const (
 	// EventText is an incremental chunk of assistant-visible text.
 	EventText EventKind = iota
-	// EventToolCall summarizes a tool invocation (for the transcript, spec §5.5).
+	// EventToolCall summarizes a tool invocation (for the transcript).
 	EventToolCall
 	// EventError is a non-fatal error notice surfaced mid-run.
 	EventError
@@ -77,7 +77,7 @@ type ToolCall struct {
 	Summary string
 }
 
-// Request is everything an adapter needs to execute one run (spec §5.1).
+// Request is everything an adapter needs to execute one run.
 type Request struct {
 	UserID int64
 	RunID  int64
@@ -91,7 +91,7 @@ type Request struct {
 	AllowedTools  []string          // tool names pre-allowed so unattended runs never stall
 	BuiltinTools  []string          // Claude Code built-in tools to enable (empty = none)
 	Workspace     string            // cwd for the run (the user's mounted workspace)
-	ResumeSession string            // optional native-continuity session id (spec §5.4)
+	ResumeSession string            // optional native-continuity session id
 	Env           map[string]string // per-user secrets injected as env vars for skill scripts
 }
 
@@ -114,7 +114,7 @@ type Result struct {
 	ToolCalls           []ToolCall
 }
 
-// AgentRuntime is the swappable execution engine (spec §5.1). Run streams events
+// AgentRuntime is the swappable execution engine. Run streams events
 // via onEvent (which may be nil) and returns the final Result.
 type AgentRuntime interface {
 	Name() string

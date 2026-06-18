@@ -1,6 +1,6 @@
--- Scheduler jobs (spec §8). DB-backed, evaluated by a 1-minute tick loop;
+-- Scheduler jobs. DB-backed, evaluated by a 1-minute tick loop;
 -- survives restarts because all state is here. next_fire_utc is materialized
--- (spec §8.2): recomputed on timezone change, not evaluated every tick.
+--: recomputed on timezone change, not evaluated every tick.
 
 CREATE TABLE jobs (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,

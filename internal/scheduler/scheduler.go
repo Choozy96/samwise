@@ -1,6 +1,6 @@
-// Package scheduler runs the 1-minute tick loop that fires due jobs (spec §8).
+// Package scheduler runs the 1-minute tick loop that fires due jobs.
 // It implements the timezone edge-case handling: the double-fire guard and the
-// within-current-period catch-up window (spec §8.3).
+// within-current-period catch-up window.
 package scheduler
 
 import (
@@ -209,7 +209,7 @@ func (s *Scheduler) process(ctx context.Context, j store.Job, now time.Time) {
 
 	switch {
 	case firePeriod != "once" && firePeriod == j.LastFiredPeriod:
-		// Double-fire guard (spec §8.3): already fired this period (e.g. a tz
+		// Double-fire guard: already fired this period (e.g. a tz
 		// change pulled the moment back). Advance without firing.
 		s.advance(ctx, j, spec, loc, now, j.LastFiredPeriod)
 		return
@@ -291,7 +291,7 @@ func (s *Scheduler) fireAgentRun(ctx context.Context, j store.Job) {
 		s.log.Error("scheduler: agent_run with empty prompt", "job_id", j.ID)
 		return
 	}
-	// Retry once, then a one-line failure notice (spec §8.4, §11).
+	// Retry once, then a one-line failure notice.
 	res, err := s.orch.RunAgentJobWithSkill(ctx, j.UserID, p.Prompt, p.Skill, p.Agent)
 	if err != nil {
 		s.log.Warn("scheduler: agent_run failed, retrying once", "job_id", j.ID, "err", err)

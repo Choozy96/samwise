@@ -13,7 +13,7 @@ import (
 	"samwise/internal/store"
 )
 
-// TryCommand intercepts slash commands typed in any channel (spec parity: web +
+// TryCommand intercepts slash commands typed in any channel (parity across web +
 // Telegram). It returns the reply text and handled=true when the message was a
 // recognized command; otherwise handled=false and the caller dispatches the
 // message to the agent as normal. Unrecognized "/..." messages are passed

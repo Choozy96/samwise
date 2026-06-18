@@ -1,6 +1,6 @@
 // Package auth handles portal credential hashing and verification.
 //
-// Passwords are hashed with argon2id (spec §12) and stored in the standard PHC
+// Passwords are hashed with argon2id and stored in the standard PHC
 // string format, so parameters travel with each hash and can be upgraded later
 // without a schema change.
 package auth

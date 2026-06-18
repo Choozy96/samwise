@@ -12,7 +12,7 @@ briefings) are delivered through a user **extension system**, not core code.
 
 **Docs:** [Deploy & operate](docs/DEPLOY.md) · [User guide](docs/user-guide.md) (also in-app under **Guide**) · [Security model](SECURITY.md)
 
-> **Status:** MVP complete (spec steps 1–6) — a useful single-user assistant.
+> **Status:** MVP complete — a useful single-user assistant.
 > The channels runtime, codex-exec, per-user containers, and the reference
 > briefing extension come after.
 
@@ -37,13 +37,13 @@ briefings) are delivered through a user **extension system**, not core code.
 
 ## Language: Go (rationale)
 
-The spec deliberately left the language open (§1). Go was chosen because the core
+The language was deliberately left open. Go was chosen because the core
 is a **long-running concurrent service** doing several things at once — child-process
 supervision (spawning/managing `claude`/`codex` runs), a scheduler tick loop,
 channel pollers, and a web server. Go gives that profile a single static binary,
 first-class concurrency, and trivial Docker packaging, with a small auditable
-dependency surface — matching the spec's "boring, auditable, no framework-heavy
-stack" mandate. The web portal is stdlib `net/http` + `html/template`; the
+dependency surface — a deliberately boring, auditable, no-framework-heavy
+stack. The web portal is stdlib `net/http` + `html/template`; the
 database driver is pure-Go `modernc.org/sqlite` (no cgo, FTS5 support).
 
 ## Database hosting
@@ -54,11 +54,11 @@ on a Docker named volume (`/data/app.db` in-container, `./data/app.db` for nativ
 dev), configurable via `DB_PATH`. A client/server engine (Postgres-in-a-container)
 was explicitly considered and rejected — it would forfeit the pure-Go build, FTS5
 retrieval, the `sqlite-vec` upgrade path, and single-file portability, for
-infrastructure this single-owner system doesn't need (spec §6).
+infrastructure this single-owner system doesn't need.
 
 ## Secrets
 
-Two tiers (spec §10.2):
+Two tiers:
 
 - **Bootstrap secrets** — `MASTER_KEY`, `SESSION_KEY`, Telegram bot token — live
   in the env file (`.env`, `chmod 600`), never in the repo or DB.
@@ -70,7 +70,7 @@ Two tiers (spec §10.2):
 
 ## Extensions
 
-Domain powers are added through extensions (spec §7), not core code. Manage them
+Domain powers are added through extensions, not core code. Manage them
 on the **Extensions** page in the portal.
 
 - **MCP servers** — register external tool servers (Google Calendar, Todoist,
@@ -85,13 +85,13 @@ on the **Extensions** page in the portal.
     populate the npx cache) so it connects reliably.
 - **Skills** — markdown instruction files that shape behavior. "Always on" skills
   are injected into every chat; others are followed when relevant or when a job
-  names one. Edit a skill to change behavior — no code change (spec §7.4).
+  names one. Edit a skill to change behavior — no code change.
 - **Morning briefing** (reference extension) — one click on the Extensions page
   creates a `morning-briefing` skill and a daily `agent_run` job that assembles
   your reminders + memory (+ any registered tools) and delivers at your configured
   time. Degrades gracefully when you have no external tools.
 
-Deferred: helper **scripts** (§7.2) need per-user container isolation (not yet
+Deferred: helper **scripts** need per-user container isolation (not yet
 built) to run safely; native `.claude/skills` files for the channels runtime are
 written when that runtime lands (headless uses context injection today).
 

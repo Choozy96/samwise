@@ -1,5 +1,5 @@
 // Package schedule holds the timezone-aware fire-time math for the scheduler
-// (spec §8.2). All functions are pure given a clock instant, so they are easy to
+//. All functions are pure given a clock instant, so they are easy to
 // reason about and reuse from both the tick loop and the set_timezone tool.
 //
 // next_fire is materialized (computed and stored), then recomputed on a
@@ -80,7 +80,7 @@ func Parse(spec string) (Spec, error) {
 }
 
 // LocationFor resolves the location a job's wall times are interpreted in
-// (spec §8.2). Unknown zones fall back to UTC.
+//. Unknown zones fall back to UTC.
 func LocationFor(tzMode, tzRef, userTZ string) *time.Location {
 	switch tzMode {
 	case "fixed_utc":
@@ -131,7 +131,7 @@ func NextFireUTC(spec Spec, loc *time.Location, after time.Time) (time.Time, boo
 }
 
 // PeriodKey identifies the period a fire instant belongs to, used for the
-// double-fire guard (spec §8.3). Daily/Weekly use the local date; Once is a
+// double-fire guard. Daily/Weekly use the local date; Once is a
 // single fire so its period is constant.
 func PeriodKey(spec Spec, t time.Time, loc *time.Location) string {
 	if spec.Kind == Once {
@@ -141,7 +141,7 @@ func PeriodKey(spec Spec, t time.Time, loc *time.Location) string {
 }
 
 // RecomputeUserLocal recomputes next_fire_utc for all of a user's enabled
-// user_local jobs against their current timezone (spec §8.2). Intended to run in
+// user_local jobs against their current timezone. Intended to run in
 // the same logical step as the timezone change. now is the clock instant to
 // schedule after.
 func RecomputeUserLocal(ctx context.Context, db *store.DB, userID int64, now time.Time) error {

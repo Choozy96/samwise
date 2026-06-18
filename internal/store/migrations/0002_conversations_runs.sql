@@ -1,14 +1,14 @@
--- Working memory (spec §6): conversations, their transcripts, and a record of
+-- Working memory: conversations, their transcripts, and a record of
 -- each agent run. The rolling summary lives on the conversation row; the
 -- transcript is the messages table. Tool-call summaries are stored as messages
 -- with role='tool' so a rehydrated runtime knows which side effects already
--- happened (spec §5.5).
+-- happened.
 
 CREATE TABLE conversations (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     channel            TEXT    NOT NULL,            -- web | telegram
-    harness_session_id TEXT,                        -- native-continuity optimization (spec §5.4)
+    harness_session_id TEXT,                        -- native-continuity optimization
     summary            TEXT    NOT NULL DEFAULT '', -- rolling summary
     summary_msg_count  INTEGER NOT NULL DEFAULT 0,  -- messages folded into summary so far
     created_at         TEXT    NOT NULL DEFAULT (datetime('now')),

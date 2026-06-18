@@ -1,4 +1,4 @@
-// Package mcpserver implements the core MCP server (spec §3, §6): the tools the
+// Package mcpserver implements the core MCP server: the tools the
 // assistant uses to read/write memory and settings. It runs as the `mcp`
 // subcommand over stdio, spawned by a runtime adapter with the user_id/run_id
 // the orchestrator chose — so every tool call is bound to a run context and the
@@ -202,7 +202,7 @@ func (h *handlers) setTimezone(ctx context.Context, _ *mcp.CallToolRequest, in s
 	if err := h.db.UpdateTimezone(ctx, h.userID, tz); err != nil {
 		return h.fail("set_timezone", "tz="+tz, err.Error()), nil, nil
 	}
-	// A timezone change recomputes the user's user_local jobs (spec §8.2).
+	// A timezone change recomputes the user's user_local jobs.
 	if err := schedule.RecomputeUserLocal(ctx, h.db, h.userID, time.Now()); err != nil {
 		fmt.Fprintf(os.Stderr, "mcp: recompute jobs after tz change: %v\n", err)
 	}

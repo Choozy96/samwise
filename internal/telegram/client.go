@@ -1,5 +1,5 @@
 // Package telegram implements the Telegram channel: a long-polling bot for
-// inbound messages, a pairing flow, and an outbound sender (spec §4.1, §4.3).
+// inbound messages, a pairing flow, and an outbound sender.
 // The orchestrator is the only component that touches Telegram; agents never do.
 package telegram
 

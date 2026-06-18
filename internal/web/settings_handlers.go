@@ -111,7 +111,7 @@ func (s *Server) settingsData(st *store.Settings) pageData {
 }
 
 // handleSaveSettings validates and persists settings edits. A timezone change
-// must recompute the user's user_local scheduled jobs (spec §8.2); the scheduler
+// must recompute the user's user_local scheduled jobs; the scheduler
 // hook for that is added in MVP step 5 — here we persist the value.
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())
@@ -171,7 +171,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	// A timezone change recomputes the user's user_local scheduled jobs (spec §8.2).
+	// A timezone change recomputes the user's user_local scheduled jobs.
 	if oldTZ != tz {
 		if err := schedule.RecomputeUserLocal(r.Context(), s.db, u.ID, time.Now()); err != nil {
 			s.log.Error("recompute jobs after tz change", "user_id", u.ID, "err", err)

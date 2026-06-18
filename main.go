@@ -21,7 +21,7 @@ import (
 
 	// Embed the IANA timezone database so time.LoadLocation works on Windows
 	// and in slim containers that lack system zoneinfo. Timezones are core to
-	// the scheduler (spec §8.2), so this must always resolve.
+	// the scheduler, so this must always resolve.
 	_ "time/tzdata"
 )
 

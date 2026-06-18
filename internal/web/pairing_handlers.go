@@ -9,7 +9,7 @@ import (
 )
 
 // handlePairingSubmit redeems a pairing code, linking the Telegram sender to the
-// logged-in user (spec §4.1). It lives on the Agents page now.
+// logged-in user. It lives on the Agents page now.
 func (s *Server) handlePairingSubmit(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())
 	code := strings.ToUpper(strings.TrimSpace(r.FormValue("code")))

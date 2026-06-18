@@ -1,4 +1,4 @@
--- Per-user (or global) MCP server registry (spec §7.3). Enabled entries are
+-- Per-user (or global) MCP server registry. Enabled entries are
 -- composed into each run's --mcp-config alongside the core server. Credentials
 -- (env vars, http headers, API tokens, SA JSON) are encrypted at rest under
 -- MASTER_KEY via internal/secretbox; only secret_enc is sensitive.

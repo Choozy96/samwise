@@ -14,8 +14,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # ── Runtime stage ─────────────────────────────────────────────────────────
 # Node base so the `claude` CLI (the claude-headless runtime) is available
-# inside the container. Harness auth is provided via a mounted volume (spec
-# §10.2), not baked into the image.
+# inside the container. Harness auth is provided via a mounted volume, not
+# baked into the image.
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tini gosu python3 python3-pip \

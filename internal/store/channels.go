@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-// ChannelIdentity links an external sender to an app user (spec §4.1). BotID
+// ChannelIdentity links an external sender to an app user. BotID
 // distinguishes which Telegram bot the sender is paired to (0 = the legacy
 // single-token bot, or a non-bot channel); the same Telegram account can pair to
 // several bots, one identity row each.

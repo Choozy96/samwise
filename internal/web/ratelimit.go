@@ -6,7 +6,7 @@ import (
 )
 
 // rateLimiter is a small in-memory sliding-window limiter used to throttle
-// login attempts (spec §12: "rate-limited login"). Keyed by client IP. Adequate
+// login attempts. Keyed by client IP. Adequate
 // for a single-process, ≤5-user deployment; a distributed setup would need a
 // shared store, but that's out of scope.
 type rateLimiter struct {

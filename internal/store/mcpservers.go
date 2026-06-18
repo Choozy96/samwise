@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-// MCPServer is a registered external MCP server (spec §7.3). UserID == 0 means a
+// MCPServer is a registered external MCP server. UserID == 0 means a
 // global (admin-managed) entry visible to all users. SecretEnc is the encrypted
 // {env,headers} blob (decrypted only at dispatch by the orchestrator).
 type MCPServer struct {

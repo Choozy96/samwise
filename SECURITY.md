@@ -49,7 +49,7 @@ unless egress is restricted; `Task` (sub-agents) is flagged extra-dangerous. Kee
 these off (and the master switch off) on untrusted deployments.
 
 The intended isolation boundary for untrusted multi-user is **per-user
-containers** (planned; spec step 8). Until then:
+containers** (planned). Until then:
 
 - **Single-user or trusted multi-user (family/team): fine as-is** — the agent
   only ever reaches its own user's data through the tools, and host-tool file

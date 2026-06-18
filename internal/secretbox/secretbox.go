@@ -1,10 +1,10 @@
 // Package secretbox is the single chokepoint for encrypting secrets stored in
-// the SQLite DB (spec §10.2): MCP credentials, API tokens, service-account JSON.
+// the SQLite DB: MCP credentials, API tokens, service-account JSON.
 //
 // Everything is AES-256-GCM under the bootstrap MASTER_KEY. Because the key
 // lives outside the DB (in the env file), DB dumps and backups are safe to move.
 // Keeping all encryption behind this one type means a future KMS/Vault swap is a
-// localized change (spec's deferred hardening note).
+// localized change.
 package secretbox
 
 import (

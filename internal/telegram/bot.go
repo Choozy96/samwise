@@ -45,7 +45,7 @@ func NewBot(client *Client, db *store.DB, orch *orchestrator.Orchestrator, log *
 }
 
 // Run polls for updates until ctx is cancelled. Inbound long-polling reconnects
-// automatically on error (spec §11).
+// automatically on error.
 func (b *Bot) Run(ctx context.Context) {
 	b.log.Info("telegram bot started")
 	var offset int64
@@ -389,7 +389,7 @@ func replyContext(msg *Message, selfID int64) string {
 	return fmt.Sprintf("[Replying to a message from %s:\n%s]\n\n", who, quoted)
 }
 
-// handleUnpaired issues a pairing code to an unknown sender or group (spec §4.1).
+// handleUnpaired issues a pairing code to an unknown sender or group.
 // This is the only reply an unpaired sender gets; it lets the owner link the chat
 // from the portal.
 func (b *Bot) handleUnpaired(ctx context.Context, externalID string, chatID int64, group bool) {

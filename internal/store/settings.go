@@ -48,7 +48,7 @@ func (db *DB) SetOnboarded(ctx context.Context, userID int64, done bool) error {
 }
 
 // UpdateTimezone sets just the timezone (used by the set_timezone tool). The
-// scheduler layer recomputes affected jobs separately (spec §8.2).
+// scheduler layer recomputes affected jobs separately.
 func (db *DB) UpdateTimezone(ctx context.Context, userID int64, tz string) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE user_settings SET timezone = ? WHERE user_id = ?`, tz, userID)
@@ -56,7 +56,7 @@ func (db *DB) UpdateTimezone(ctx context.Context, userID int64, tz string) error
 }
 
 // UpdateSettings persists an edited settings row. Timezone changes that must
-// recompute scheduled jobs are handled by the scheduler layer (spec §8.2), not
+// recompute scheduled jobs are handled by the scheduler layer, not
 // here — this is a plain write.
 func (db *DB) UpdateSettings(ctx context.Context, s *Settings) error {
 	_, err := db.ExecContext(ctx,

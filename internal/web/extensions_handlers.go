@@ -110,7 +110,7 @@ func (s *Server) handleSecretDelete(w http.ResponseWriter, r *http.Request) {
 const briefingJobName = "Morning briefing"
 
 // handleExtensions renders the Extensions page: MCP registry + skills + the
-// morning-briefing reference extension (spec §7, §12).
+// morning-briefing reference extension.
 func (s *Server) handleExtensions(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r.Context())
 	mcps, err := s.db.ListMCPServersForUser(r.Context(), u.ID)

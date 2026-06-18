@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// ClaudeHeadless runs each turn as a fresh `claude -p` process (spec §5.4). It
+// ClaudeHeadless runs each turn as a fresh `claude -p` process. It
 // is stateless-rehydrated-from-memory: the orchestrator assembles the full
 // context every run, so correctness never depends on a live session. Native
 // continuity via --resume is an optimization layered on later.
@@ -104,7 +104,7 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 		"--strict-mcp-config", // ignore the host's inherited MCP servers
 		"--mcp-config", mcpConfig,
 		// Full replacement (not append): the orchestrator owns the assistant's
-		// identity and behavior (spec §5.5), not Claude Code's default coding
+		// identity and behavior, not Claude Code's default coding
 		// persona.
 		"--system-prompt-file", sysPath,
 		"--permission-mode", "default",
@@ -277,7 +277,7 @@ func (c *ClaudeHeadless) writeSystemFile(req Request) (string, func(), error) {
 }
 
 // buildPrompt renders the stdin prompt: recent transcript (context) followed by
-// the new message. Stateless rehydration (spec §5.5).
+// the new message. Stateless rehydration.
 func buildPrompt(req Request) string {
 	if strings.TrimSpace(req.Transcript) == "" {
 		return req.Prompt

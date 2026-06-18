@@ -15,7 +15,7 @@ type User struct {
 	CreatedAt    string
 }
 
-// Settings holds a user's per-user preferences (spec §9).
+// Settings holds a user's per-user preferences.
 type Settings struct {
 	UserID            int64
 	Timezone          string // IANA name
