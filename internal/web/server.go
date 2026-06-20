@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"samwise/internal/config"
@@ -75,9 +76,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /memory", s.requireAuth(s.handleMemory))
 	mux.HandleFunc("POST /memory/add", s.requireAuth(s.handleMemoryAdd))
 	mux.HandleFunc("POST /memory/delete", s.requireAuth(s.handleMemoryDelete))
+	mux.HandleFunc("POST /memory/scope", s.requireAuth(s.handleMemoryScope))
 	mux.HandleFunc("GET /jobs", s.requireAuth(s.handleJobs))
 	mux.HandleFunc("POST /jobs/create", s.requireAuth(s.handleJobCreate))
 	mux.HandleFunc("POST /jobs/update", s.requireAuth(s.handleJobUpdate))
+	mux.HandleFunc("POST /jobs/enable", s.requireAuth(s.handleJobEnable))
 	mux.HandleFunc("POST /jobs/delete", s.requireAuth(s.handleJobDelete))
 	mux.HandleFunc("GET /audit", s.requireAuth(s.handleAudit))
 	mux.HandleFunc("GET /guide", s.requireAuth(s.handleGuide))
@@ -113,8 +116,25 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// clientIP extracts a best-effort client IP for rate-limiting keys.
-func clientIP(r *http.Request) string {
+// clientIP extracts a best-effort client IP for rate-limiting keys and audit.
+//
+// Behind a reverse proxy the TCP peer is always the proxy, so without
+// X-Forwarded-For every request shares one rate-limit key (per-attacker
+// throttling is lost, and one attacker could exhaust the shared bucket). When
+// TrustProxy is set we take the right-most X-Forwarded-For entry: that's the
+// address our immediate trusted proxy observed and appended, so a client can
+// prepend forged values but can't forge the one that actually counts. Only
+// enable TrustProxy when the app isn't directly reachable (it isn't — 8080 is
+// loopback-only behind the nginx proxy).
+func (s *Server) clientIP(r *http.Request) string {
+	if s.cfg.TrustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
+				return ip
+			}
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

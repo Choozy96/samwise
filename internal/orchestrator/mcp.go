@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"samwise/internal/store"
 )
@@ -18,28 +17,37 @@ type mcpSecret struct {
 }
 
 // buildMCP assembles the --mcp-config JSON and the matching --allowedTools list
-// for a run: the core server (this binary, bound to the run context) plus every
-// enabled registry entry for the user. Secrets are decrypted in
-// memory here and never written to disk in plaintext.
-func (o *Orchestrator) buildMCP(ctx context.Context, userID, runID int64) (string, []string) {
+// for a run: the core server (hosted in-process, reached over a token-scoped
+// loopback HTTP endpoint) plus every enabled registry entry for the user.
+// Secrets are decrypted in memory here and travel in the config; the caller
+// writes it to a 0600 file, never argv. The returned revoke func tears down the
+// run's core-MCP token and must be called when the run ends.
+func (o *Orchestrator) buildMCP(ctx context.Context, scope runScope) (string, []string, func()) {
 	servers := map[string]any{}
 	allowed := append([]string{}, coreTools...)
+	revoke := func() {}
 
-	if o.exePath != "" {
-		servers["core"] = map[string]any{
-			"command": o.exePath,
-			"args": []string{
-				"mcp",
-				"--db", o.dbAbs,
-				"--user-id", strconv.FormatInt(userID, 10),
-				"--run-id", strconv.FormatInt(runID, 10),
-			},
+	if o.mcp.ready() {
+		token, rev, err := o.mcp.register(scope)
+		if err != nil {
+			o.log.Error("registering core mcp token", "err", err)
+		} else {
+			revoke = rev
+			servers["core"] = map[string]any{
+				"type": "http",
+				"url":  o.mcp.endpoint(),
+				"headers": map[string]any{
+					"Authorization": "Bearer " + token,
+				},
+			}
 		}
+	} else {
+		o.log.Error("core mcp host not started; core tools unavailable for run", "run_id", scope.runID)
 	}
 
-	regs, err := o.db.ListEnabledMCPServers(ctx, userID)
+	regs, err := o.db.ListEnabledMCPServers(ctx, scope.userID)
 	if err != nil {
-		o.log.Error("listing mcp servers", "user_id", userID, "err", err)
+		o.log.Error("listing mcp servers", "user_id", scope.userID, "err", err)
 	}
 	for _, m := range regs {
 		entry, ok := o.registryEntry(m)
@@ -54,7 +62,8 @@ func (o *Orchestrator) buildMCP(ctx context.Context, userID, runID int64) (strin
 	b, err := json.Marshal(map[string]any{"mcpServers": servers})
 	if err != nil {
 		o.log.Error("marshaling mcp config", "err", err)
-		return `{"mcpServers":{}}`, coreTools
+		revoke()
+		return `{"mcpServers":{}}`, coreTools, func() {}
 	}
 	// Note: never log the config JSON — it contains decrypted credentials.
 	names := make([]string, 0, len(servers))
@@ -62,7 +71,7 @@ func (o *Orchestrator) buildMCP(ctx context.Context, userID, runID int64) (strin
 		names = append(names, n)
 	}
 	o.log.Debug("composed mcp config", "servers", names)
-	return string(b), allowed
+	return string(b), allowed, revoke
 }
 
 // registryEntry builds the --mcp-config server object for a registry row.

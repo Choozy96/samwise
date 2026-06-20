@@ -39,7 +39,9 @@
   header.nav a:hover { color:var(--accent); text-decoration:none; }
   header.nav .spacer { flex:1; }
   header.nav .muted { color:var(--muted); font-size:.85rem; }
-  main { max-width:880px; margin:1.5rem auto; padding:0 1.25rem; }
+  /* Wide enough to use a 1080p screen (less table side-scroll); on smaller/mobile
+     viewports it falls back to full width minus the side padding. */
+  main { max-width:1200px; margin:1.5rem auto; padding:0 1.25rem; }
   h1 { font-size:1.4rem; margin:.2rem 0 1rem; }
   h2 { font-size:1.1rem; margin:1.5rem 0 .5rem; }
   .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:1.25rem; margin-bottom:1.25rem; overflow-x:auto; }
@@ -49,8 +51,11 @@
   input[type=checkbox] { width:auto; }
   button,.btn { display:inline-block; padding:.5rem 1.1rem; background:var(--accent); color:#fff; border:0; border-radius:999px; font:inherit; font-weight:700; cursor:pointer; }
   button:hover,.btn:hover { background:var(--accent-hover); }
-  button.secondary { background:var(--panel); color:var(--link); border:1px solid var(--border); }
-  button.secondary:hover { background:var(--subtle); color:var(--link-hover); }
+  button.secondary, .btn.secondary { background:var(--panel); color:var(--link); border:1px solid var(--border); }
+  button.secondary:hover, .btn.secondary:hover { background:var(--subtle); color:var(--link-hover); }
+  details > summary.btn { list-style:none; }
+  details > summary.btn::-webkit-details-marker { display:none; }
+  select.scope-sel { width:auto; min-width:7rem; max-width:10rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .row { display:flex; gap:1rem; flex-wrap:wrap; }
   .row > div { flex:1; min-width:180px; }
   .flash { padding:.6rem .8rem; border-radius:6px; margin-bottom:1rem; }
@@ -59,13 +64,16 @@
   .table-wrap { overflow-x:auto; }
   table { width:100%; border-collapse:collapse; }
   th,td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--border); }
+  /* Long free-text columns (a cron job's prompt, a memory's content) wrap and cap
+     their width instead of stretching the table — the main cause of side-scroll. */
+  td.wrap-cell { max-width:420px; overflow-wrap:break-word; white-space:normal; }
   th { color:var(--muted); font-weight:600; font-size:.85rem; }
   .pill { font-size:.75rem; padding:.1rem .55rem; border-radius:999px; background:var(--subtle); border:1px solid var(--border); color:var(--muted); }
   code { background:var(--subtle); border:1px solid var(--border); padding:.05rem .35rem; border-radius:4px; }
   .markdown h1 { margin-top:0; }
   .markdown h2 { border-bottom:1px solid var(--border); padding-bottom:.3rem; }
   .markdown h3 { font-size:1rem; }
-  .markdown p, .markdown li { line-height:1.6; }
+  .markdown p, .markdown li { line-height:1.6; max-width:80ch; }
   .markdown ul, .markdown ol { padding-left:1.4rem; }
   .markdown table { margin:.5rem 0 1rem; }
   .markdown td, .markdown th { vertical-align:top; }
@@ -113,6 +121,57 @@
       try { localStorage.setItem('theme', next); } catch(e){}
       paint();
     });
+  })();
+</script>
+<script>
+  /* Click-to-sort for any <table class="sortable">. A header cell sorts the rows
+     by that column (toggling asc/desc); cells may carry data-sort="<key>" for a
+     sortable value that differs from the displayed text (e.g. a raw timestamp).
+     Headers that are empty or marked data-nosort are skipped. Pure client-side —
+     it reorders the rows currently on the page. */
+  (function(){
+    function cellKey(row, i){
+      var td = row.cells[i];
+      if (!td) return '';
+      var d = td.getAttribute('data-sort');
+      return (d !== null ? d : td.textContent).trim();
+    }
+    function compare(a, b){
+      var na = parseFloat(a), nb = parseFloat(b);
+      if (a !== '' && b !== '' && !isNaN(na) && !isNaN(nb)) return na - nb;
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    function wire(table){
+      var head = table.tHead && table.tHead.rows[0];
+      var body = table.tBodies[0];
+      if (!head || !body) return;
+      Array.prototype.forEach.call(head.cells, function(th, idx){
+        if (th.hasAttribute('data-nosort') || th.textContent.trim() === '') return;
+        th.style.cursor = 'pointer';
+        th.style.userSelect = 'none';
+        th.addEventListener('click', function(){
+          var asc = th.getAttribute('data-dir') !== 'asc';
+          var rows = Array.prototype.slice.call(body.rows);
+          rows.sort(function(r1, r2){
+            var c = compare(cellKey(r1, idx), cellKey(r2, idx));
+            return asc ? c : -c;
+          });
+          rows.forEach(function(r){ body.appendChild(r); });
+          Array.prototype.forEach.call(head.cells, function(o){
+            o.removeAttribute('data-dir');
+            var s = o.querySelector('.sort-ind'); if (s) s.remove();
+          });
+          th.setAttribute('data-dir', asc ? 'asc' : 'desc');
+          var ind = document.createElement('span');
+          ind.className = 'sort-ind';
+          ind.textContent = asc ? ' ▲' : ' ▼';
+          ind.style.opacity = '.6';
+          ind.style.fontSize = '.75em';
+          th.appendChild(ind);
+        });
+      });
+    }
+    document.querySelectorAll('table.sortable').forEach(wire);
   })();
 </script>
 </body>

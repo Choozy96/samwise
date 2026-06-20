@@ -36,7 +36,7 @@ func (db *DB) CreateUser(ctx context.Context, username, passwordHash string, isA
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO user_settings(user_id) VALUES(?)`, id); err != nil {
+		`INSERT INTO user_settings(user_id, distill_notify) VALUES(?, 0)`, id); err != nil {
 		return 0, fmt.Errorf("inserting settings: %w", err)
 	}
 	// Seed a default agent and make it active (multi-agent setup).

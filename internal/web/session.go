@@ -30,7 +30,7 @@ func (s *Server) issueSession(w http.ResponseWriter, userID int64) {
 		Value:    val,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   s.cfg.IsProd(),
+		Secure:   s.cfg.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Unix(exp, 0),
 		MaxAge:   int(sessionTTL.Seconds()),
@@ -44,7 +44,7 @@ func (s *Server) clearSession(w http.ResponseWriter) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   s.cfg.IsProd(),
+		Secure:   s.cfg.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})

@@ -33,6 +33,13 @@ func runServe(_ []string) error {
 	// channels and codex adapters slot in behind the same interface later.
 	headless := runtime.NewClaudeHeadless(d.cfg.ClaudeBin, d.log)
 	orch := orchestrator.New(d.cfg, d.db, d.log, d.box, headless)
+	// Bring up the in-process, token-scoped core MCP host before serving. Fail
+	// loudly if its loopback listener can't bind — a run with no core host gets
+	// no memory/job tools, and we never want to silently fall back to spawning
+	// the core server under the agent's uid.
+	if err := orch.Start(); err != nil {
+		return err
+	}
 
 	srv := &http.Server{
 		Addr:              d.cfg.HTTPAddr,

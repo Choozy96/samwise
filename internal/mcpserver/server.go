@@ -23,14 +23,40 @@ import (
 
 // Config binds the server to a run context.
 type Config struct {
-	DBPath string
-	UserID int64
-	RunID  int64
+	DBPath  string
+	UserID  int64
+	RunID   int64
+	AgentID int64
+}
+
+// NewServer builds an in-process core MCP server bound to a single run context
+// (userID/runID) over the orchestrator's already-open DB. The user id is fixed
+// here by the trusted caller — never taken from agent input — so a run can only
+// ever touch its own user's data. This is how the orchestrator hosts the core
+// tools itself (token-scoped HTTP) instead of spawning a per-run child that
+// would run under the agent's uid with direct DB access.
+// Binding is the per-run context a core server is bound to.
+type Binding struct {
+	UserID, RunID, AgentID int64
+	ReadOnly               bool
+	// OriginBotID/OriginChatID are the Telegram bot+chat the run came from (0 =
+	// web/none), so job_create can resolve a "here" delivery destination.
+	OriginBotID, OriginChatID int64
+}
+
+func NewServer(db *store.DB, b Binding) *mcp.Server {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "core", Version: "0.1.0"}, nil)
+	(&handlers{
+		db: db, userID: b.UserID, runID: b.RunID, agentID: b.AgentID, readOnly: b.ReadOnly,
+		originBotID: b.OriginBotID, originChatID: b.OriginChatID,
+	}).register(srv)
+	return srv
 }
 
 // Run opens the shared DB and serves the core tools over stdio until the client
 // disconnects or ctx is cancelled. Migrations are owned by the orchestrator, so
-// this only opens the existing database.
+// this only opens the existing database. Retained for out-of-process/debug use;
+// the orchestrator now hosts the core server in-process via NewServer.
 func Run(ctx context.Context, cfg Config) error {
 	db, err := store.Open(cfg.DBPath)
 	if err != nil {
@@ -38,17 +64,24 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer db.Close()
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: "core", Version: "0.1.0"}, nil)
-	h := &handlers{db: db, userID: cfg.UserID, runID: cfg.RunID}
-	h.register(srv)
-
-	return srv.Run(ctx, &mcp.StdioTransport{})
+	return NewServer(db, Binding{UserID: cfg.UserID, RunID: cfg.RunID, AgentID: cfg.AgentID}).Run(ctx, &mcp.StdioTransport{})
 }
 
 type handlers struct {
-	db     *store.DB
-	userID int64
-	runID  int64
+	db           *store.DB
+	userID       int64
+	runID        int64
+	agentID      int64 // the running agent; agent-scoped memory is tagged with it
+	readOnly     bool  // write tools refuse when set (unregistered group sender)
+	originBotID  int64 // telegram bot+chat the run came from (0 = web/none), for
+	originChatID int64 // resolving a job's "here" delivery destination
+}
+
+// denyWrite refuses a write tool for a read-only run with a clear, relayable
+// message, and audits the denial.
+func (h *handlers) denyWrite(tool string) *mcp.CallToolResult {
+	h.audit(tool, "read-only run", "denied")
+	return textResult("Not permitted: in this group chat, only members whose Telegram account is registered with the assistant can change memory, jobs, or settings. (You can still read and chat.)")
 }
 
 // ── tool argument types (schemas inferred from these structs) ────────────────
@@ -57,6 +90,7 @@ type memorySaveIn struct {
 	Content string `json:"content" jsonschema:"the durable fact, preference, or event to remember"`
 	Topic   string `json:"topic" jsonschema:"a short topic label, e.g. work, health, family"`
 	Kind    string `json:"kind" jsonschema:"one of: fact, preference, event"`
+	Scope   string `json:"scope,omitempty" jsonschema:"'user' (default) for facts about the user that all of your personas should share; 'agent' for facts specific to this persona/role only"`
 }
 
 type memorySearchIn struct {
@@ -115,22 +149,33 @@ func (h *handlers) register(s *mcp.Server) {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func (h *handlers) memorySave(ctx context.Context, _ *mcp.CallToolRequest, in memorySaveIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("memory_save"), nil, nil
+	}
 	content := strings.TrimSpace(in.Content)
 	if content == "" {
 		return h.fail("memory_save", "topic="+in.Topic, "content is required"), nil, nil
 	}
 	kind := normalizeKind(in.Kind)
-	id, err := h.db.SaveSemantic(ctx, h.userID, strings.TrimSpace(in.Topic), kind, content, "assistant")
+	// Default to user-scope (shared across the user's agents); "agent" tags it to
+	// the running agent so only this persona sees it.
+	scope := int64(0)
+	scopeLabel := "user"
+	if strings.EqualFold(strings.TrimSpace(in.Scope), "agent") {
+		scope = h.agentID
+		scopeLabel = "agent"
+	}
+	id, err := h.db.SaveSemantic(ctx, h.userID, scope, strings.TrimSpace(in.Topic), kind, content, "assistant")
 	if err != nil {
 		return h.fail("memory_save", "topic="+in.Topic, err.Error()), nil, nil
 	}
-	h.audit("memory_save", fmt.Sprintf("kind=%s topic=%s", kind, in.Topic), "ok")
-	return textResult(fmt.Sprintf("Saved memory id=%d (%s).", id, kind)), nil, nil
+	h.audit("memory_save", fmt.Sprintf("kind=%s topic=%s scope=%s", kind, in.Topic, scopeLabel), "ok")
+	return textResult(fmt.Sprintf("Saved %s memory id=%d (%s).", scopeLabel, id, kind)), nil, nil
 }
 
 func (h *handlers) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, in memorySearchIn) (*mcp.CallToolResult, any, error) {
 	k := h.retrievalK(ctx)
-	hits, err := h.db.SearchMemory(ctx, h.userID, in.Query, strings.TrimSpace(in.Topic), in.After, in.Before, k)
+	hits, err := h.db.SearchMemory(ctx, h.userID, h.agentID, in.Query, strings.TrimSpace(in.Topic), in.After, in.Before, k)
 	if err != nil {
 		return h.fail("memory_search", "query~"+snippet(in.Query), err.Error()), nil, nil
 	}
@@ -150,6 +195,9 @@ func (h *handlers) memorySearch(ctx context.Context, _ *mcp.CallToolRequest, in 
 }
 
 func (h *handlers) memoryForget(ctx context.Context, _ *mcp.CallToolRequest, in memoryForgetIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("memory_forget"), nil, nil
+	}
 	// Semantic and episodic ids live in separate tables. Honor an explicit layer;
 	// if none is given, try semantic first, then episodic.
 	layer := strings.ToLower(strings.TrimSpace(in.Layer))
@@ -160,10 +208,10 @@ func (h *handlers) memoryForget(ctx context.Context, _ *mcp.CallToolRequest, in 
 		ok, err = h.db.ForgetEpisodic(ctx, h.userID, in.ID)
 		layer = "episodic"
 	case "semantic", "fact", "preference", "event":
-		ok, err = h.db.ForgetSemantic(ctx, h.userID, in.ID)
+		ok, err = h.db.ForgetSemantic(ctx, h.userID, h.agentID, in.ID)
 		layer = "semantic"
 	default:
-		if ok, err = h.db.ForgetSemantic(ctx, h.userID, in.ID); err == nil && !ok {
+		if ok, err = h.db.ForgetSemantic(ctx, h.userID, h.agentID, in.ID); err == nil && !ok {
 			ok, err = h.db.ForgetEpisodic(ctx, h.userID, in.ID)
 		}
 		layer = "memory"
@@ -183,7 +231,7 @@ func (h *handlers) memoryForget(ctx context.Context, _ *mcp.CallToolRequest, in 
 }
 
 func (h *handlers) memoryListTopics(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
-	topics, err := h.db.ListTopics(ctx, h.userID)
+	topics, err := h.db.ListTopics(ctx, h.userID, h.agentID)
 	if err != nil {
 		return h.fail("memory_list_topics", "", err.Error()), nil, nil
 	}
@@ -195,6 +243,9 @@ func (h *handlers) memoryListTopics(ctx context.Context, _ *mcp.CallToolRequest,
 }
 
 func (h *handlers) setTimezone(ctx context.Context, _ *mcp.CallToolRequest, in setTimezoneIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("set_timezone"), nil, nil
+	}
 	tz := strings.TrimSpace(in.Timezone)
 	if _, err := time.LoadLocation(tz); err != nil {
 		return h.fail("set_timezone", "tz="+tz, "unknown timezone"), nil, nil

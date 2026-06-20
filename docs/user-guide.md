@@ -95,6 +95,27 @@ that, **anyone in the group** talks to *your* assistant — sharing your memory,
 skills, and context. So only add it to groups you trust. For separate memory,
 pair the group to a **different user account** instead.
 
+**Who can change things (write permission).** Everyone in the group can chat with
+the assistant, but only people whose **own Telegram account is paired** with the
+assistant (a registered user — pair by DMing the bot) may perform **write**
+actions: saving/forgetting memory, creating or editing cron jobs and reminders,
+and running write-capable tools. For everyone else the run is **read-only** — they
+can ask and read, but can't mutate your account. The same gate covers slash
+commands (below). Tip: if you own the group, DM-pair your own account too, so you
+can run commands and writes there.
+
+**Commands in groups need an explicit mention.** In a group, a slash command runs
+only when it's a *clean* command that **names this bot**. Any of these three forms
+work (use whichever feels natural):
+
+- `@thisbot /command args` — mention first
+- `/command args @thisbot` — mention last
+- `/command@thisbot args` — Telegram's native form (what the `/` command menu inserts)
+
+A bare `/command` with no mention is ignored, and a slash buried in other text
+("hey /status") is treated as normal chatter, not a command. In a **DM** no
+mention is needed — just send `/command args`.
+
 **Reply mode** (Settings → group reply mode, or `/groupreply`): by default the bot
 in a group replies **only when it's addressed** — an @mention, a reply to one of
 its messages, or a command. Switch to **reply to every message** if you want it to
@@ -162,9 +183,9 @@ own.
      anything new (incremental — it extends the existing note, doesn't start over).
    - **At end of day** (your **distillation time** in Settings → Memory), it
      re-reads the whole day and writes the authoritative summary for that date.
-   - By default it **sends you that end-of-day note** so you can see what it
-     remembered; turn this off under **Settings → Memory & context** if you'd
-     rather it stay silent.
+   - Distillation is **silent by default**. If you'd like to see what it
+     remembered, turn on the **end-of-day note** under **Settings → Memory &
+     context** and it'll message you that summary when the daily pass runs.
 
 ### How memory gets retrieved
 
@@ -183,7 +204,8 @@ to the conversation — you don't have to remind it of things it already knows.
 
 The **Memory** page lets you browse by **topic** (facts) or by **date** (daily
 notes), **search** across everything, drill into a topic or date, and add or
-delete entries.
+delete entries. Click any table's column header to **sort** by it (click again to
+reverse).
 
 ## Skills
 
@@ -246,8 +268,18 @@ Under **Cron jobs** you can create things that run automatically.
   **Cron jobs** form, or **just ask the assistant in chat** — e.g. "set up a
   daily briefing at 8am" or "move my 9pm report to 10pm." It can list, change,
   pause, and delete your scheduled jobs for you.
+- **Where the result lands**: each agent run has its own delivery destination —
+  your default channel, the web portal, or a specific Telegram chat you're paired
+  to (pick it in the **Cron jobs** form's *Deliver result to* dropdown, or tell
+  the assistant "deliver this one here" / "send it to the web"). You can only
+  choose chats you actually belong to.
 - **Timezone drift**: jobs set to *your local time* follow you when you travel; tell
   the assistant "I've landed in London" and your schedule shifts with you.
+- **Pausing**: untick **Enabled** when editing a job to pause it — it stays in your
+  list but won't fire until you re-enable it. (One-shot jobs auto-pause after they
+  run; a job that keeps failing to authenticate is paused too.)
+- **Sorting**: click any column header in the jobs table to sort by it (click again
+  to reverse).
 
 ## Audit log
 

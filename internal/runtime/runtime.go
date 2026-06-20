@@ -14,6 +14,11 @@ import "context"
 // can execute. Sandboxing is at the container boundary.
 var ScopedBuiltinTools = []string{"Read", "Glob", "Grep", "Bash", "Write", "Edit"}
 
+// ReadOnlyBuiltinTools is the subset used for read-only runs (e.g. an unregistered
+// member in a group): file reads only — no Bash/Write/Edit, which can mutate the
+// owner's workspace or run arbitrary commands.
+var ReadOnlyBuiltinTools = []string{"Read", "Glob", "Grep"}
+
 // OptionalTool is a Claude Code built-in a user can opt into (per tool) beyond
 // the scoped default set. Danger, when set, is an extra-caution warning; Useless
 // marks tools with no real effect in this embedded, non-interactive setup.
@@ -93,6 +98,19 @@ type Request struct {
 	Workspace     string            // cwd for the run (the user's mounted workspace)
 	ResumeSession string            // optional native-continuity session id
 	Env           map[string]string // per-user secrets injected as env vars for skill scripts
+
+	// Isolation, when non-nil, runs the agent process (and thus its host tools)
+	// as this unprivileged per-user uid/gid, so a prompt-injected or malicious
+	// agent can't read another user's workspace or the database. Set only when
+	// the orchestrator confirmed it can (root on Linux); nil otherwise.
+	Isolation *RunIsolation
+}
+
+// RunIsolation is the per-run OS identity for the agent process.
+type RunIsolation struct {
+	UID    int   // run as this user id
+	GID    int   // run as this group id
+	Groups []int // supplementary gids (e.g. the shared claude-credentials group)
 }
 
 // Result is the outcome of a completed run. Token counts are tracked by type

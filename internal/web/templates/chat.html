@@ -38,7 +38,7 @@
 <style>
   .msg { margin:.5rem 0; display:flex; }
   .msg.user { justify-content:flex-end; }
-  .msg .bubble { max-width:78%; padding:.55rem .8rem; border-radius:14px; white-space:pre-wrap; word-wrap:break-word; }
+  .msg .bubble { max-width:min(78%, 820px); padding:.55rem .8rem; border-radius:14px; white-space:pre-wrap; word-wrap:break-word; }
   .msg.user .bubble { background:var(--link); color:#fff; }
   .msg.assistant .bubble { background:var(--subtle); color:var(--fg); border:1px solid var(--border); }
   .msg.tool { font-size:.8rem; color:var(--muted); font-style:italic; padding-left:.3rem; }

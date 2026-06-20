@@ -13,8 +13,8 @@ import (
 	"samwise/internal/store"
 )
 
-// TryCommand intercepts slash commands typed in any channel (parity across web +
-// Telegram). It returns the reply text and handled=true when the message was a
+// TryCommand intercepts slash commands typed in any channel (web + Telegram).
+// It returns the reply text and handled=true when the message was a
 // recognized command; otherwise handled=false and the caller dispatches the
 // message to the agent as normal. Unrecognized "/..." messages are passed
 // through to the agent (handled=false) so they aren't swallowed.
@@ -235,7 +235,7 @@ func (o *Orchestrator) cmdRecall(ctx context.Context, userID int64, arg string) 
 	if q == "" {
 		return "Usage: /recall <what to search for>."
 	}
-	hits, err := o.db.SearchMemory(ctx, userID, q, "", "", "", 10)
+	hits, err := o.db.SearchMemory(ctx, userID, store.AllAgents, q, "", "", "", 10)
 	if err != nil {
 		return "Search failed."
 	}

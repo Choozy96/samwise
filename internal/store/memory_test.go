@@ -35,15 +35,15 @@ func TestSearchMemoryUserScopedFTS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := db.SaveSemantic(ctx, uA, "health", "fact", "Allergic to peanuts", "test"); err != nil {
+	if _, err := db.SaveSemantic(ctx, uA, 0, "health", "fact", "Allergic to peanuts", "test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SaveSemantic(ctx, uB, "health", "fact", "Allergic to shellfish", "test"); err != nil {
+	if _, err := db.SaveSemantic(ctx, uB, 0, "health", "fact", "Allergic to shellfish", "test"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Alice's query must find her own row (stemmed match on "allergic").
-	hits, err := db.SearchMemory(ctx, uA, "am I allergic to anything?", "", "", "", 8)
+	hits, err := db.SearchMemory(ctx, uA, AllAgents, "am I allergic to anything?", "", "", "", 8)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -62,11 +62,56 @@ func TestSearchMemoryUserScopedFTS(t *testing.T) {
 	}
 
 	// Topic filter.
-	none, err := db.SearchMemory(ctx, uA, "allergic", "work", "", "", 8)
+	none, err := db.SearchMemory(ctx, uA, AllAgents, "allergic", "work", "", "", 8)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(none) != 0 {
 		t.Errorf("topic filter failed: expected 0, got %d", len(none))
+	}
+}
+
+// TestMemoryAgentScope is the core of the user/agent memory split: a run as agent
+// A sees user-scoped memory plus its own, but never another agent's; user-scope
+// (0) sees only shared memory; AllAgents (the editor) sees everything.
+func TestMemoryAgentScope(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	uid, _ := db.CreateUser(ctx, "alice", "h", false)
+	const agentA, agentB = int64(10), int64(20)
+
+	if _, err := db.SaveSemantic(ctx, uid, 0, "t", "fact", "shared user fact", "test"); err != nil {
+		t.Fatal(err)
+	}
+	db.SaveSemantic(ctx, uid, agentA, "t", "fact", "agent A persona fact", "test")
+	db.SaveSemantic(ctx, uid, agentB, "t", "fact", "agent B persona fact", "test")
+
+	collect := func(scope int64) map[string]bool {
+		hits, err := db.SearchMemory(ctx, uid, scope, "fact", "", "", "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, h := range hits {
+			got[h.Content] = true
+		}
+		return got
+	}
+
+	a := collect(agentA)
+	if !a["shared user fact"] || !a["agent A persona fact"] {
+		t.Error("agent A should see user memory and its own")
+	}
+	if a["agent B persona fact"] {
+		t.Error("LEAK: agent A saw agent B's memory")
+	}
+
+	u := collect(0)
+	if !u["shared user fact"] || u["agent A persona fact"] || u["agent B persona fact"] {
+		t.Errorf("user-scope (0) should see only shared memory, got %v", u)
+	}
+
+	if all := collect(AllAgents); len(all) != 3 {
+		t.Errorf("AllAgents should see all three scopes, got %v", all)
 	}
 }

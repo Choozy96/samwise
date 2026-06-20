@@ -6,12 +6,15 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"samwise/internal/config"
 	"samwise/internal/runtime"
@@ -45,9 +48,17 @@ type Orchestrator struct {
 	box      *secretbox.Box
 	runtimes map[string]runtime.AgentRuntime
 	fallback runtime.AgentRuntime
-	exePath  string        // this binary, re-invoked as the core MCP server
-	dbAbs    string        // absolute DB path for the MCP subprocess
-	telegram ChannelSender // optional Telegram delivery sink (MVP step 6)
+	exePath  string        // this binary (retained for out-of-process tooling)
+	dbAbs    string        // absolute DB path (retained for out-of-process tooling)
+	mcp       *mcpHost      // in-process, token-scoped core MCP server
+	isolate   bool          // run each agent as a per-user uid (resolved in Start)
+	claudeDir string        // the shared claude config dir (source of the credential)
+	telegram  ChannelSender // optional Telegram delivery sink (MVP step 6)
+	// credMu serializes writes to the one shared claude.ai credential file. Every
+	// user's run links to the same canonical .credentials.json, so concurrent runs
+	// reconciling a refreshed token would otherwise tear that file (truncate +
+	// interleaved write) and break auth for everyone.
+	credMu sync.Mutex
 }
 
 // New constructs an Orchestrator. The fallback runtime is used when a user's
@@ -57,7 +68,7 @@ func New(cfg *config.Config, db *store.DB, log *slog.Logger, box *secretbox.Box,
 	for _, rt := range runtimes {
 		m[rt.Name()] = rt
 	}
-	o := &Orchestrator{cfg: cfg, db: db, log: log, box: box, runtimes: m}
+	o := &Orchestrator{cfg: cfg, db: db, log: log, box: box, runtimes: m, mcp: newMCPHost(db, log)}
 	if rt, ok := m["claude-headless"]; ok {
 		o.fallback = rt
 	} else if len(runtimes) > 0 {
@@ -66,6 +77,10 @@ func New(cfg *config.Config, db *store.DB, log *slog.Logger, box *secretbox.Box,
 	if exe, err := os.Executable(); err == nil {
 		o.exePath = exe
 	}
+	o.claudeDir = os.Getenv("CLAUDE_CONFIG_DIR")
+	if o.claudeDir == "" {
+		o.claudeDir = "/home/app/.claude"
+	}
 	if abs, err := filepath.Abs(cfg.DBPath); err == nil {
 		o.dbAbs = abs
 	} else {
@@ -73,6 +88,46 @@ func New(cfg *config.Config, db *store.DB, log *slog.Logger, box *secretbox.Box,
 	}
 	return o
 }
+
+// Start brings up the in-process core MCP host. It must be called before
+// dispatching runs; serve fails loudly if the loopback listener can't bind,
+// rather than silently falling back to a less-isolated path.
+//
+// It also resolves whether per-user uid isolation can run: it needs root on
+// Linux (the container). If isolation was requested but we're not root/Linux
+// (e.g. native dev), it's disabled with a loud warning rather than failing.
+func (o *Orchestrator) Start() error {
+	if o.cfg.AgentIsolation {
+		if os.Geteuid() == 0 {
+			o.isolate = true
+			// New files the orchestrator creates (DB sidecars, workspace files,
+			// backups) default to owner-only, so nothing the agent uid shouldn't
+			// see is born world-readable.
+			setRestrictiveUmask()
+			if err := o.prepareDataPerms(); err != nil {
+				o.log.Error("isolation: preparing /data perms", "err", err)
+			}
+			o.log.Info("agent isolation enabled", "uid_base", o.cfg.AgentUIDBase, "cred_gid", o.cfg.AgentCredGID)
+		} else {
+			o.log.Warn("AGENT_ISOLATION requested but process is not root (or not Linux); " +
+				"agent host tools will NOT be uid-isolated between users")
+		}
+	}
+	return o.mcp.start()
+}
+
+// Isolated reports whether per-user uid isolation is active.
+func (o *Orchestrator) Isolated() bool { return o.isolate }
+
+// runIsolation is the per-user OS identity for a run: uid/gid base+userID, with
+// the shared credentials gid so the agent can still read the claude.ai auth dir.
+func (o *Orchestrator) runIsolation(userID int64) *runtime.RunIsolation {
+	id := o.cfg.AgentUIDBase + int(userID)
+	return &runtime.RunIsolation{UID: id, GID: id, Groups: []int{o.cfg.AgentCredGID}}
+}
+
+// Close shuts the core MCP host down.
+func (o *Orchestrator) Close(ctx context.Context) error { return o.mcp.shutdown(ctx) }
 
 // Attachment is a file the user attached to a message, saved in their workspace.
 // Text is the inlined content for small text files (else empty), so text
@@ -98,6 +153,20 @@ type DispatchRequest struct {
 	// (no user/assistant/tool messages, no session update) — for internal passes
 	// like distillation that must not pollute the transcript or loop on themselves.
 	Silent bool
+	// Isolated runs in a separate per-(user,agent) "task" thread with NO chat
+	// transcript (memory is still loaded). Used by scheduled agent_run jobs so a
+	// task never reads or pollutes the interactive conversation, and a task firing
+	// at the same time as a message can't merge with it.
+	Isolated bool
+	// ReadOnly forbids write operations for this turn: the core MCP write tools
+	// refuse, and only read built-in tools are enabled. Set for messages from
+	// unregistered senders in a group (they can chat/read but not mutate the
+	// owner's memory, jobs, or workspace).
+	ReadOnly bool
+	// OriginBotID/OriginChatID identify the Telegram bot+chat this turn came from
+	// (0 for web), so a job created this turn can target "here" for delivery.
+	OriginBotID  int64
+	OriginChatID int64
 }
 
 // Dispatch runs one turn end-to-end: persist the user message, assemble context,
@@ -121,7 +190,12 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 	if channel == "" {
 		channel = "web"
 	}
-	conv, err := o.db.GetOrCreateConversation(ctx, req.User.ID, channel, agent.ID)
+	var conv *store.Conversation
+	if req.Isolated {
+		conv, err = o.db.GetOrCreateTaskConversation(ctx, req.User.ID, agent.ID)
+	} else {
+		conv, err = o.db.GetOrCreateConversation(ctx, req.User.ID, channel, agent.ID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolving conversation: %w", err)
 	}
@@ -132,6 +206,11 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 	asm, err := o.assemble(ctx, req.User, settings, agent, conv, req.UserMessage)
 	if err != nil {
 		return nil, fmt.Errorf("assembling context: %w", err)
+	}
+	// Isolated (scheduled task) runs are stateless: memory is loaded, but the chat
+	// transcript is never read — so the conversation can't bleed into a task.
+	if req.Isolated {
+		asm.transcript = ""
 	}
 
 	// Attachments augment both the stored transcript entry (names only) and the
@@ -158,7 +237,35 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 			fmt.Sprintf("agent=%s: %s", agent.Name, auditSnippet(req.UserMessage)), "ok")
 	}
 
-	mcpJSON, allowedTools := o.buildMCP(ctx, req.User.ID, runID)
+	mcpScope := runScope{
+		userID: req.User.ID, runID: runID, agentID: agent.ID, readOnly: req.ReadOnly,
+		originBotID: req.OriginBotID, originChatID: req.OriginChatID,
+	}
+	mcpJSON, allowedTools, releaseMCP := o.buildMCP(ctx, mcpScope)
+	defer releaseMCP()
+
+	// When isolation is active, run the agent as the user's per-user uid and make
+	// sure their workspace tree is owned by it first.
+	var iso *runtime.RunIsolation
+	runEnv := o.userSecretsEnv(ctx, req.User.ID)
+	if o.isolate {
+		iso = o.runIsolation(req.User.ID)
+		if err := o.ensureWorkspaceOwner(req.User.ID, iso); err != nil {
+			return nil, fmt.Errorf("preparing isolated workspace: %w", err)
+		}
+		if err := o.setupRunClaudeDir(req.User.ID, iso); err != nil {
+			o.log.Error("preparing per-user claude config dir", "user_id", req.User.ID, "err", err)
+		}
+		// Each uid gets its own claude config dir + HOME inside its 0700 workspace,
+		// so claude's transcripts/state stay private to that user.
+		if runEnv == nil {
+			runEnv = map[string]string{}
+		}
+		ws := o.workspace(req.User.ID)
+		runEnv["HOME"] = ws
+		runEnv["CLAUDE_CONFIG_DIR"] = filepath.Join(ws, ".claude")
+	}
+
 	rreq := runtime.Request{
 		UserID:        req.User.ID,
 		RunID:         runID,
@@ -169,8 +276,9 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 		Workspace:     o.workspace(req.User.ID),
 		MCPConfigJSON: mcpJSON,
 		AllowedTools:  allowedTools,
-		BuiltinTools:  o.builtinTools(settings),
-		Env:           o.userSecretsEnv(ctx, req.User.ID),
+		BuiltinTools:  o.builtinTools(settings, req.ReadOnly),
+		Env:           runEnv,
+		Isolation:     iso,
 	}
 
 	res, runErr := rt.Run(ctx, rreq, onEvent)
@@ -294,9 +402,13 @@ func auditSnippet(s string) string {
 // deployment's ALLOW_AGENT_TOOLS is the master switch (off => no host tools at
 // all); on top of that the user's settings opt into individual extra tools (each
 // validated against the catalog, so only known tools can ever be enabled).
-func (o *Orchestrator) builtinTools(s *store.Settings) []string {
+func (o *Orchestrator) builtinTools(s *store.Settings, readOnly bool) []string {
 	if !o.cfg.AllowAgentTools {
 		return nil
+	}
+	if readOnly {
+		// No write-capable tools and no opt-in extras for an unregistered sender.
+		return append([]string{}, runtime.ReadOnlyBuiltinTools...)
 	}
 	tools := append([]string{}, runtime.ScopedBuiltinTools...)
 	for _, name := range strings.Split(s.ExtraTools, ",") {
@@ -340,4 +452,127 @@ func (o *Orchestrator) workspace(userID int64) string {
 		return abs
 	}
 	return p
+}
+
+// prepareDataPerms locks down the data directory for uid isolation: the DB is
+// readable only by root (the orchestrator), the data dirs are traverse-only
+// (0711, so an agent can reach its own workspace by exact path but can't list
+// siblings), and every existing per-user workspace is made private to its run
+// uid. Runs once at startup when isolation is active.
+func (o *Orchestrator) prepareDataPerms() error {
+	dataDir := filepath.Dir(o.dbAbs)
+	wsRoot := filepath.Join(dataDir, "workspaces")
+	if err := os.MkdirAll(wsRoot, 0o711); err != nil {
+		return err
+	}
+	// Lock the DB and its WAL/SHM sidecars to root-only: SQLite creates the
+	// sidecars 0644 by default, so an agent could otherwise read recent
+	// transactions straight out of app.db-wal even with app.db itself at 0600.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		p := o.dbAbs + suffix
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if err := os.Chown(p, 0, 0); err != nil {
+			return fmt.Errorf("chown %s: %w", p, err)
+		}
+		if err := os.Chmod(p, 0o600); err != nil {
+			return fmt.Errorf("chmod %s: %w", p, err)
+		}
+	}
+	for _, d := range []string{dataDir, wsRoot} {
+		if err := os.Chmod(d, 0o711); err != nil {
+			return fmt.Errorf("chmod %s: %w", d, err)
+		}
+	}
+	entries, err := os.ReadDir(wsRoot)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		uid, err := strconv.ParseInt(e.Name(), 10, 64)
+		if !e.IsDir() || err != nil {
+			continue // not a numeric per-user workspace
+		}
+		if err := o.ensureWorkspaceOwner(uid, o.runIsolation(uid)); err != nil {
+			o.log.Error("isolation: chown existing workspace", "user_id", uid, "err", err)
+		}
+	}
+	return nil
+}
+
+// ensureWorkspaceOwner makes a user's workspace tree owned by, and private to,
+// their run uid (0700 at the root). Called before each isolated run so files the
+// orchestrator wrote as root (uploads, skill mirrors) are readable by the agent.
+func (o *Orchestrator) ensureWorkspaceOwner(userID int64, iso *runtime.RunIsolation) error {
+	ws := o.workspace(userID)
+	if err := os.MkdirAll(ws, 0o700); err != nil {
+		return err
+	}
+	if err := filepath.WalkDir(ws, func(p string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// Lchown, not Chown: the per-user .claude dir contains a symlink to the
+		// SHARED credential — following it would chown the canonical credential to
+		// this run's uid and break it for everyone else.
+		return os.Lchown(p, iso.UID, iso.GID)
+	}); err != nil {
+		return err
+	}
+	return os.Chmod(ws, 0o700)
+}
+
+// setupRunClaudeDir gives a run its own claude config dir inside the user's 0700
+// workspace, so claude's per-run state (transcripts, .claude.json) is private to
+// that uid instead of shared and cross-readable. Only the claude.ai credential is
+// shared (one subscription, by design) — symlinked in from the canonical dir.
+// If a prior run's token refresh replaced that symlink with a real file, its
+// contents are first written back to the canonical, then the symlink restored —
+// so refreshes still propagate to the one shared credential.
+func (o *Orchestrator) setupRunClaudeDir(userID int64, iso *runtime.RunIsolation) error {
+	dir := filepath.Join(o.workspace(userID), ".claude")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chown(dir, iso.UID, iso.GID); err != nil {
+		return err
+	}
+	cred := filepath.Join(o.claudeDir, ".credentials.json")
+	if _, err := os.Stat(cred); err != nil {
+		return nil // no shared credential yet (e.g. claude not authed) — nothing to link
+	}
+	link := filepath.Join(dir, ".credentials.json")
+
+	// Serialize the whole reconcile: the canonical credential is shared by every
+	// user's run, so two runs reconciling at once (e.g. two cron jobs firing
+	// together) must not write it concurrently.
+	o.credMu.Lock()
+	defer o.credMu.Unlock()
+
+	if fi, err := os.Lstat(link); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return nil // already linked
+		}
+		// A refresh clobbered the symlink with a real file: persist the new token
+		// back to the shared credential, then relink. Only write back a COMPLETE,
+		// valid token — a partial read (claude mid-write) or empty file must never
+		// overwrite the canonical, or it breaks auth for every user.
+		if data, rerr := os.ReadFile(link); rerr == nil {
+			if len(data) > 0 && json.Valid(data) {
+				if werr := os.WriteFile(cred, data, 0o640); werr != nil {
+					o.log.Error("syncing refreshed credential to shared file", "err", werr)
+				}
+			} else {
+				o.log.Warn("skipping credential writeback: refreshed file not valid JSON",
+					"user_id", userID, "bytes", len(data))
+			}
+		}
+		_ = os.Remove(link)
+	}
+	if err := os.Symlink(cred, link); err != nil {
+		return err
+	}
+	_ = os.Lchown(link, iso.UID, iso.GID)
+	return nil
 }

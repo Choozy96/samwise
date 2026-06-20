@@ -24,6 +24,7 @@ type jobCreateIn struct {
 	Prompt   string `json:"prompt" jsonschema:"the instruction to run at that time; its final output is delivered to the user"`
 	Skill    string `json:"skill,omitempty" jsonschema:"optional: name of an installed skill to load into the run"`
 	Agent    string `json:"agent,omitempty" jsonschema:"optional: name of the agent persona to run as (defaults to the active agent)"`
+	Delivery string `json:"delivery,omitempty" jsonschema:"where to deliver the result: 'here' (this chat) or 'web' (the web portal). Omit to use the user's default delivery channel."`
 }
 
 type jobUpdateIn struct {
@@ -33,6 +34,7 @@ type jobUpdateIn struct {
 	Prompt   string `json:"prompt,omitempty" jsonschema:"new prompt"`
 	Skill    string `json:"skill,omitempty" jsonschema:"new skill name; pass '-' to clear it"`
 	Agent    string `json:"agent,omitempty" jsonschema:"new agent name; pass '-' to clear it"`
+	Delivery string `json:"delivery,omitempty" jsonschema:"new delivery destination: 'here' (this chat), 'web', or '-' to reset to the user's default"`
 	Enabled  *bool  `json:"enabled,omitempty" jsonschema:"set false to pause the job, true to resume it"`
 }
 
@@ -40,11 +42,29 @@ type jobDeleteIn struct {
 	ID int64 `json:"id" jsonschema:"the job id to delete (from job_list)"`
 }
 
-// agentRunPayload is the JSON stored in jobs.payload for type=agent_run.
+// agentRunPayload is the JSON stored in jobs.payload for type=agent_run. Delivery
+// is "" (the user's default channel), "web", or "tg:<botID>:<chatID>".
 type agentRunPayload struct {
-	Prompt string `json:"prompt"`
-	Skill  string `json:"skill,omitempty"`
-	Agent  string `json:"agent,omitempty"`
+	Prompt   string `json:"prompt"`
+	Skill    string `json:"skill,omitempty"`
+	Agent    string `json:"agent,omitempty"`
+	Delivery string `json:"delivery,omitempty"`
+}
+
+// resolveDelivery turns a "here"/"web"/"" tool argument into a stored delivery
+// target. "here" becomes this run's Telegram chat (or web when there is none).
+func (h *handlers) resolveDelivery(arg string) string {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "web":
+		return "web"
+	case "here":
+		if h.originChatID != 0 {
+			return fmt.Sprintf("tg:%d:%d", h.originBotID, h.originChatID)
+		}
+		return "web" // created from the web portal → "here" means web
+	default:
+		return "" // user's default delivery channel
+	}
 }
 
 func (h *handlers) registerJobs(s *mcp.Server) {
@@ -67,6 +87,9 @@ func (h *handlers) registerJobs(s *mcp.Server) {
 }
 
 func (h *handlers) jobCreate(ctx context.Context, _ *mcp.CallToolRequest, in jobCreateIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("job_create"), nil, nil
+	}
 	name := strings.TrimSpace(in.Name)
 	prompt := strings.TrimSpace(in.Prompt)
 	specStr := strings.TrimSpace(in.Schedule)
@@ -81,6 +104,7 @@ func (h *handlers) jobCreate(ctx context.Context, _ *mcp.CallToolRequest, in job
 
 	payload, _ := json.Marshal(agentRunPayload{
 		Prompt: prompt, Skill: strings.TrimSpace(in.Skill), Agent: strings.TrimSpace(in.Agent),
+		Delivery: h.resolveDelivery(in.Delivery),
 	})
 	id, err := h.db.CreateJob(ctx, store.Job{
 		UserID:       h.userID,
@@ -140,6 +164,9 @@ func (h *handlers) jobList(ctx context.Context, _ *mcp.CallToolRequest, _ emptyI
 }
 
 func (h *handlers) jobUpdate(ctx context.Context, _ *mcp.CallToolRequest, in jobUpdateIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("job_update"), nil, nil
+	}
 	j, err := h.db.GetJob(ctx, h.userID, in.ID)
 	if err != nil {
 		return h.fail("job_update", fmt.Sprintf("id=%d", in.ID), "no such job"), nil, nil
@@ -162,6 +189,13 @@ func (h *handlers) jobUpdate(ctx context.Context, _ *mcp.CallToolRequest, in job
 	}
 	if s := strings.TrimSpace(in.Agent); s != "" {
 		p.Agent = clearable(s)
+	}
+	if s := strings.TrimSpace(in.Delivery); s != "" {
+		if s == "-" {
+			p.Delivery = "" // reset to the user's default channel
+		} else {
+			p.Delivery = h.resolveDelivery(s)
+		}
 	}
 	if in.Enabled != nil {
 		j.Enabled = *in.Enabled
@@ -193,6 +227,9 @@ func (h *handlers) jobUpdate(ctx context.Context, _ *mcp.CallToolRequest, in job
 }
 
 func (h *handlers) jobDelete(ctx context.Context, _ *mcp.CallToolRequest, in jobDeleteIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("job_delete"), nil, nil
+	}
 	j, err := h.db.GetJob(ctx, h.userID, in.ID)
 	if err != nil {
 		return h.fail("job_delete", fmt.Sprintf("id=%d", in.ID), "no such job"), nil, nil

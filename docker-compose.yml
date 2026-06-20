@@ -44,26 +44,74 @@ services:
     networks:
       - appnet
 
-  # ── Optional TLS reverse proxy ────────────────────────────────────────────
-  # Uncomment to serve the portal over HTTPS with an auto-provisioned cert.
-  # 1. Point a domain's A record at this VPS.
-  # 2. Create ./Caddyfile with:
-  #        your-domain.example {
-  #            reverse_proxy orchestrator:8080
-  #        }
-  # 3. Open the firewall for 80 + 443 (and keep 8080 closed to the internet).
-  # caddy:
-  #   image: caddy:2
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
-  #     - caddy-data:/data
-  #     - caddy-config:/config
-  #   networks:
-  #     - appnet
+  # ── Optional plain-HTTP reverse proxy (no TLS) ─────────────────────────────
+  # Serve the portal on port 80 so you reach it at http://<host>/ (no :8080).
+  # Opt-in via the "http" profile:  docker compose --profile http up -d
+  # NO encryption — use only behind a private network (VPN/Tailscale) or for
+  # testing. For HTTP, also set COOKIE_SECURE=false and TRUST_PROXY=true in .env
+  # (otherwise the Secure session cookie isn't sent over http:// and login fails).
+  # Do NOT run this together with the "tls" profile — both bind port 80.
+  nginx-http:
+    image: nginx:1.27-alpine
+    profiles: ["http"]
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/http/app.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - appnet
+
+  # ── Optional TLS reverse proxy (nginx + Let's Encrypt via certbot) ─────────
+  # Opt-in: only runs with the "tls" profile, so the default `docker compose up`
+  # is unchanged (portal stays loopback-only). To serve HTTPS:
+  #   1. Point a DNS A record (your domain) at this VPS's public IP.
+  #   2. In .env set  SITE_ADDRESS=your-domain.example,  CERTBOT_EMAIL=you@...,
+  #      and  TRUST_PROXY=true
+  #   3. Open the firewall for 80 + 443 only; keep 8080 closed/loopback.
+  #   4. Get the first certificate:  ./nginx/init-letsencrypt.sh
+  #      (then `docker compose --profile tls up -d` keeps it running + renews)
+  # nginx terminates TLS and proxies to the app over the internal network
+  # (orchestrator:8080), not the host port. certbot renews; nginx reloads.
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["tls"]
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-}
+      # Only substitute ${SITE_ADDRESS} in the template — leave nginx's own
+      # $host/$remote_addr/etc. variables untouched.
+      NGINX_ENVSUBST_FILTER: SITE_ADDRESS
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - certbot-conf:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot:ro
+    # Reload every 6h so renewed certs are picked up without a restart. We re-exec
+    # the image's own entrypoint with `nginx` so it still runs template rendering
+    # (envsubst app.conf.template -> conf.d/app.conf); a bare `/bin/sh` command
+    # makes the entrypoint skip that and you'd get only the default config.
+    command: /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec /docker-entrypoint.sh nginx -g 'daemon off;'"
+    networks:
+      - appnet
+
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["tls"]
+    restart: unless-stopped
+    volumes:
+      - certbot-conf:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    # Attempt renewal twice a day; certbot is a no-op until ~30 days before expiry.
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done"
+    networks:
+      - appnet
 
 # Single bridge network for now. Egress is unrestricted by default for
 # usability (agents fetch the web); restricting it later is a config change
@@ -74,5 +122,5 @@ networks:
 
 volumes:
   app-data:
-  # caddy-data:   # uncomment with the caddy service above
-  # caddy-config:
+  certbot-conf:    # Let's Encrypt certs/account (only used by the "tls" profile)
+  certbot-webroot: # ACME http-01 challenge files

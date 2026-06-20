@@ -11,6 +11,27 @@ single `--user-id`, so the agent's tools operate only on that user's data.
 This is covered by tests, e.g. `TestCrossUserIsolation`,
 `TestSearchMemoryUserScopedFTS`, and `TestMemorySearchUserScoped`.
 
+## Group chats: write operations are gated to registered users
+
+A Telegram group is paired to one **owner**, and the agent acts as that owner
+(their memory, jobs, tools). Anyone in the group can chat/read, but a message
+only gets **write** access — the core MCP write tools (`memory_save`,
+`job_*`, `reminder_set/cancel`, `set_timezone`) and write-capable built-in
+tools (`Bash`/`Write`/`Edit`) — when the **sender's own Telegram account is
+registered** (DM-paired) with the assistant. An unregistered member's run is
+read-only, so a stranger can't mutate the owner's data or run commands as them
+(`TestTelegramUserIsPaired`). The owner must DM-pair their own Telegram id to
+write in their own group.
+
+The core MCP server runs **inside the trusted orchestrator**, not as a child of
+the agent. The agent reaches it over a loopback HTTP endpoint, and which user a
+request acts as is fixed by a random **per-run bearer token** resolved
+server-side — never from agent input. So a run can only ever touch its own
+user's data; there is no `--user-id` to change (`TestMCPHostTokenScoping`,
+`TestMCPHostRejectsBadToken`). The token + any decrypted tool credentials travel
+in a `0600` per-run file, never on the command line (`/proc/<pid>/cmdline` is
+world-readable).
+
 ## The agent cannot run raw SQL (through the app)
 
 The agent interacts with stored data **only through the core MCP tools**
@@ -30,33 +51,54 @@ it cannot inject SQL or FTS operators (`TestSearchMemoryNoInjection`).
   (`TestAgentEnvStripsSecrets`).
 - The agent is also instructed never to echo a secret's value.
 
-## Known boundary: host-tool sandboxing (multi-user)
+## Host-tool isolation between users (`AGENT_ISOLATION`)
 
 When `ALLOW_AGENT_TOOLS=true` (default in the Docker image), the agent gets a
 scoped set of Claude Code built-ins — `Read`, `Glob`, `Grep`, `Bash`, `Write`,
-`Edit` — so skills can run their scripts. These tools are **not filesystem-
-sandboxed per user**: a determined or prompt-injected agent could read files on
-disk, including the SQLite database file. Encrypted secrets stay encrypted (the
-key is stripped from its environment), but **other users' plaintext rows**
-(memory, messages, usernames, password *hashes*) would be reachable.
+`Edit` — so skills can run their scripts. With a shell, tool-level path checks
+aren't enough; isolation is enforced at the **OS level**.
 
-By default the agent gets only the scoped file/shell set. A user may opt into
-**individual** extra built-in tools (Settings → Agent tools), each validated
-against a fixed catalog so only known tools can ever be enabled. Notably
-`WebFetch`/`WebSearch` add network **egress** — combined with shell access that's
-an exfiltration path, and `WebFetch` can reach internal/metadata endpoints (SSRF)
-unless egress is restricted; `Task` (sub-agents) is flagged extra-dangerous. Keep
-these off (and the master switch off) on untrusted deployments.
+With `AGENT_ISOLATION=true` (default in prod), the orchestrator runs as root and
+drops **each agent run to a distinct, unprivileged per-user uid** (`AGENT_UID_BASE
++ userID`). The kernel then bounds everything the agent's tools can touch:
 
-The intended isolation boundary for untrusted multi-user is **per-user
-containers** (planned). Until then:
+- **The database is unreachable.** `app.db` and its `-wal`/`-shm` sidecars are
+  `0600` owned by root; a restrictive umask keeps new files owner-only. The agent
+  uid can neither read the DB nor re-run the `mcp` binary against it.
+- **Other users' workspaces are invisible.** `/data` and `/data/workspaces` are
+  `0711` (traverse, not list — no enumerating siblings) and each workspace is
+  `0700` owned by its own run uid. User 2 can reach only `/data/workspaces/2`.
+- **The claude runtime's config is per-user too.** Each run gets its own
+  `CLAUDE_CONFIG_DIR`/`HOME` inside its `0700` workspace, so claude's transcripts
+  and session state are private to that uid — not shared and cross-readable.
+- The only **shared** piece is the **claude.ai credential** (one subscription for
+  all users, by design): it's symlinked into each per-user config dir from a
+  canonical group-readable/writable file, so a run can authenticate and refresh
+  the token, but that group has no path to the root-owned DB.
 
-- **Single-user or trusted multi-user (family/team): fine as-is** — the agent
-  only ever reaches its own user's data through the tools, and host-tool file
-  access exposes data the operator already trusts.
-- **Untrusted multi-user:** run with `ALLOW_AGENT_TOOLS=false` (skills' scripts
-  won't execute, but the agent has no host tools), or wait for per-user
-  containers.
+A user may still opt into **individual** extra built-in tools (Settings → Agent
+tools), each validated against a fixed catalog. `WebFetch`/`WebSearch` add network
+**egress** — with shell access that's an exfiltration path, and `WebFetch` can
+reach internal/metadata endpoints (SSRF) unless egress is restricted; `Task`
+(sub-agents) is flagged extra-dangerous.
+
+**Requirements / residuals (honest):**
+
+- Isolation needs **root on Linux** (the container provides it). Off Linux or
+  when not root — e.g. native dev — it's **disabled with a loud warning** and the
+  app falls back to the old single-uid behavior. Set `AGENT_ISOLATION=false` to
+  opt out explicitly (the app then gosu-drops to one unprivileged uid; the agent
+  shares it, so there's no per-user isolation).
+- It isolates the **filesystem**, not the network or process table, and it does
+  **not** hide unrelated world-readable system files (`/etc/passwd`, `/usr`, …) —
+  those hold no user data. Hiding the whole filesystem would need a mount
+  namespace (bubblewrap) or per-user containers.
+- The shared claude.ai OAuth token is reachable by the agent's own shell — this
+  is **by design** (every user drives the owner's one subscription). Don't expect
+  it to be hidden from users.
+- This is single-host isolation, not a container-escape boundary. For
+  **untrusted** multi-user, also run with restricted egress, and per-user
+  containers remain the stronger long-term option.
 
 ## Reporting
 

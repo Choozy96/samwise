@@ -14,8 +14,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # ── Runtime stage ─────────────────────────────────────────────────────────
 # Node base so the `claude` CLI (the claude-headless runtime) is available
-# inside the container. Harness auth is provided via a mounted volume, not
-# baked into the image.
+# inside the container. Harness auth is provided via a mounted volume, not baked
+# into the image.
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tini gosu python3 python3-pip \
@@ -29,9 +29,11 @@ RUN apt-get update \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root runtime user; its home holds mounted harness auth (~/.claude). The
-# entrypoint starts as root only long enough to fix mount ownership, then drops
-# to this user via gosu — so the app and the agent's tools never run as root.
+# Runtime user (uid 10001); its home holds mounted harness auth (~/.claude).
+# With AGENT_ISOLATION on (default), the orchestrator runs as root so it can drop
+# each agent run to an unprivileged per-user uid (base+userID) — strong per-user
+# filesystem isolation. With AGENT_ISOLATION=off the entrypoint gosu-drops the
+# whole app to this user instead (no per-user isolation, but no root either).
 RUN useradd -m -u 10001 app
 COPY --from=build /out/samwise /usr/local/bin/samwise
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -48,6 +50,8 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:8080/healthz || exit 1
 
-# Runs as root → entrypoint chowns mounts → gosu drops to uid 10001 to exec the app.
+# Starts as root → entrypoint fixes mount ownership + credential group, then
+# either runs as root (isolation on, dropping each run to a per-user uid) or
+# gosu-drops the whole app to uid 10001 (isolation off).
 ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["serve"]

@@ -12,7 +12,7 @@ import (
 func TestMemoryForgetBothLayers(t *testing.T) {
 	h, ctx := newJobHandlers(t)
 
-	semID, err := h.db.SaveSemantic(ctx, h.userID, "drink", "preference", "alice prefers tea", "assistant")
+	semID, err := h.db.SaveSemantic(ctx, h.userID, 0, "drink", "preference", "alice prefers tea", "assistant")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,10 +64,10 @@ func TestMemorySearchUserScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.SaveSemantic(ctx, bob, "t", "fact", "bob private nuclear codes", "assistant"); err != nil {
+	if _, err := h.db.SaveSemantic(ctx, bob, 0, "t", "fact", "bob private nuclear codes", "assistant"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.SaveSemantic(ctx, h.userID, "t", "fact", "my own note", "assistant"); err != nil {
+	if _, err := h.db.SaveSemantic(ctx, h.userID, 0, "t", "fact", "my own note", "assistant"); err != nil {
 		t.Fatal(err)
 	}
 

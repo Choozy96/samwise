@@ -34,22 +34,34 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	// Agents for the scope labels/dropdowns: agent_id 0 = user memory (shared).
+	agents, err := s.db.ListAgents(ctx, u.ID)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	agentNames := map[int64]string{}
+	for _, a := range agents {
+		agentNames[a.ID] = a.Name
+	}
 
 	data := pageData{
-		"Title":    "Memory",
-		"Topics":   topics,
-		"Dates":    dates,
-		"Query":    q,
-		"Topic":    topic,
-		"Date":     date,
-		"Page":     page,
-		"PrevPage": page - 1,
-		"NextPage": page + 1,
+		"Title":      "Memory",
+		"Topics":     topics,
+		"Dates":      dates,
+		"Agents":     agents,
+		"AgentNames": agentNames,
+		"Query":      q,
+		"Topic":      topic,
+		"Date":       date,
+		"Page":       page,
+		"PrevPage":   page - 1,
+		"NextPage":   page + 1,
 	}
 	off := (page - 1) * memPageSize
 	switch {
 	case q != "":
-		hits, herr := s.db.SearchMemory(ctx, u.ID, q, "", "", "", 60)
+		hits, herr := s.db.SearchMemory(ctx, u.ID, store.AllAgents, q, "", "", "", 60)
 		if herr != nil {
 			s.serverError(w, r, herr)
 			return
@@ -72,7 +84,7 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		rows, hasNext := trimPageEpi(rows)
 		data["View"], data["Episodic"], data["HasNext"] = "date", rows, hasNext
 	default:
-		recent, herr := s.db.ListSemantic(ctx, u.ID, 25)
+		recent, herr := s.db.ListSemantic(ctx, u.ID, store.AllAgents, 25)
 		if herr != nil {
 			s.serverError(w, r, herr)
 			return
@@ -118,11 +130,32 @@ func (s *Server) handleMemoryAdd(w http.ResponseWriter, r *http.Request) {
 	default:
 		kind = "fact"
 	}
-	if _, err := s.db.SaveSemantic(r.Context(), u.ID, strings.TrimSpace(r.FormValue("topic")), kind, content, "portal"); err != nil {
+	// scope: 0 = user memory (shared); a positive agent id scopes it to that agent.
+	scope, _ := strconv.ParseInt(r.FormValue("scope"), 10, 64)
+	if _, err := s.db.SaveSemantic(r.Context(), u.ID, scope, strings.TrimSpace(r.FormValue("topic")), kind, content, "portal"); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
 	http.Redirect(w, r, "/memory", http.StatusSeeOther)
+}
+
+// handleMemoryScope moves a semantic memory between user-scope (scope=0) and a
+// specific agent.
+func (s *Server) handleMemoryScope(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r.Context())
+	id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+	if err == nil {
+		scope, _ := strconv.ParseInt(r.FormValue("scope"), 10, 64)
+		if _, err = s.db.SetSemanticScope(r.Context(), u.ID, id, scope); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+	}
+	dest := "/memory"
+	if back := r.FormValue("back"); back != "" {
+		dest = back
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
 // handleMemoryDelete removes one of the user's memories (semantic by default, or
@@ -134,7 +167,7 @@ func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 		if r.FormValue("layer") == "episodic" {
 			_, err = s.db.ForgetEpisodic(r.Context(), u.ID, id)
 		} else {
-			_, err = s.db.ForgetSemantic(r.Context(), u.ID, id)
+			_, err = s.db.ForgetSemantic(r.Context(), u.ID, store.AllAgents, id)
 		}
 		if err != nil {
 			s.serverError(w, r, err)

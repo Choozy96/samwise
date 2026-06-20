@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// TestDistillNotifyDefaultAndUpdate verifies the distill-notify setting defaults
-// to on (migration 0017) and round-trips through UpdateSettings.
+// TestDistillNotifyDefaultAndUpdate verifies the distill-notify setting is OFF by
+// default (distillation is silent; the note is opt-in) and round-trips.
 func TestDistillNotifyDefaultAndUpdate(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -19,17 +19,17 @@ func TestDistillNotifyDefaultAndUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.DistillNotify {
-		t.Errorf("distill_notify should default to true")
+	if s.DistillNotify {
+		t.Errorf("distill_notify should default to false (silent)")
 	}
 
-	s.DistillNotify = false
+	s.DistillNotify = true
 	if err := db.UpdateSettings(ctx, s); err != nil {
 		t.Fatal(err)
 	}
 	s2, _ := db.GetSettings(ctx, uid)
-	if s2.DistillNotify {
-		t.Errorf("distill_notify should persist as false")
+	if !s2.DistillNotify {
+		t.Errorf("distill_notify should persist as true once opted in")
 	}
 }
 

@@ -19,27 +19,50 @@
     <input id="schedule_spec" name="schedule_spec" placeholder="daily@07:00  ·  weekly@Mon 09:00  ·  once@2026-06-20T15:00" required>
     <label for="body">Message / prompt</label>
     <textarea id="body" name="body" rows="2" required placeholder="For agent_run: the prompt. For direct_message: the text to send."></textarea>
+    <label for="delivery">Deliver result to <span class="muted">(agent_run only)</span></label>
+    <select id="delivery" name="delivery" onchange="tgToggle(this)">
+      <option value="">Default channel</option>
+      <option value="web">Web portal</option>
+      <option value="tg">A Telegram chat…</option>
+    </select>
+    <div class="tgchatwrap" style="display:none; margin-top:.4rem">
+      <input name="delivery_chat" list="tgchats" placeholder="Telegram chat or user id, e.g. 12345 or -1002223334">
+      {{if .ChatHints}}<p class="muted" style="font-size:.8rem; margin:.3rem 0 0">Paired chats: {{range $i, $h := .ChatHints}}{{if $i}}, {{end}}<code>{{$h.ChatID}}</code> ({{$h.Label}}){{end}}</p>
+      {{else}}<p class="muted" style="font-size:.8rem; margin:.3rem 0 0">No paired Telegram chats yet — DM the bot, or add it to a group, then pair it.</p>{{end}}
+    </div>
     <div style="margin-top:.75rem"><button type="submit">Create job</button></div>
   </form>
 </div>
 
+<datalist id="tgchats">{{range .ChatHints}}<option value="{{.ChatID}}">{{.Label}}</option>{{end}}</datalist>
+
 <div class="panel">
   <h2>Your jobs</h2>
   {{if .Jobs}}
-  <table>
-    <thead><tr><th>Name</th><th>Type</th><th>Schedule</th><th>Next fire</th><th>Detail</th><th></th></tr></thead>
+  <table class="sortable">
+    <thead><tr><th>Name</th><th>Type</th><th>Schedule</th><th>Next fire</th><th>Detail</th><th data-nosort title="Enable or pause">On</th><th></th></tr></thead>
     <tbody>
     {{range .Jobs}}
       <tr>
         <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">(unnamed)</span>{{end}}</td>
         <td><span class="pill">{{.Type}}</span></td>
         <td><code>{{.ScheduleSpec}}</code></td>
-        <td class="muted">{{if .Enabled}}{{.NextLocal}}{{else}}disabled{{end}}</td>
-        <td class="muted">{{.Summary}}</td>
+        <td class="muted" data-sort="{{.NextFireUTC}}">{{if .Enabled}}{{.NextLocal}}{{else}}<span class="muted">paused</span>{{end}}</td>
+        <td class="muted wrap-cell">{{.Summary}}</td>
         <td>
           {{if ne .Type "maintenance"}}
-          <details style="display:inline-block; vertical-align:top; margin-right:.4rem">
-            <summary class="secondary" style="cursor:pointer; display:inline-block">Edit</summary>
+          <form method="post" action="/jobs/enable" style="margin:0">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <input type="hidden" name="enabled" value="{{if .Enabled}}0{{else}}1{{end}}">
+            <input type="checkbox" {{if .Enabled}}checked{{end}} onchange="this.form.submit()" title="{{if .Enabled}}Pause this job{{else}}Enable this job{{end}}">
+          </form>
+          {{else}}<span class="muted">{{if .Enabled}}on{{else}}off{{end}}</span>{{end}}
+        </td>
+        <td>
+          <div style="display:flex; gap:.4rem; align-items:flex-start">
+          {{if ne .Type "maintenance"}}
+          <details>
+            <summary class="btn secondary" style="cursor:pointer">Edit</summary>
             <form method="post" action="/jobs/update" style="margin-top:.5rem; min-width:260px">
               <input type="hidden" name="id" value="{{.ID}}">
               <label>Name</label>
@@ -48,15 +71,26 @@
               <input name="schedule_spec" value="{{.ScheduleSpec}}" required>
               <label style="margin-top:.4rem">{{if eq .Type "agent_run"}}Prompt{{else}}Message{{end}}</label>
               <textarea name="body" rows="2" required>{{.Summary}}</textarea>
-              <label style="margin-top:.4rem"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Enabled</label>
+              {{if eq .Type "agent_run"}}
+              <label style="margin-top:.4rem">Deliver result to</label>
+              <select name="delivery" onchange="tgToggle(this)">
+                <option value=""{{if eq .DeliverySel ""}} selected{{end}}>Default channel</option>
+                <option value="web"{{if eq .DeliverySel "web"}} selected{{end}}>Web portal</option>
+                <option value="tg"{{if eq .DeliverySel "tg"}} selected{{end}}>A Telegram chat…</option>
+              </select>
+              <div class="tgchatwrap"{{if ne .DeliverySel "tg"}} style="display:none"{{end}}>
+                <input name="delivery_chat" list="tgchats" value="{{.DeliveryChat}}" placeholder="Telegram chat or user id">
+              </div>
+              {{end}}
               <div style="margin-top:.5rem"><button type="submit">Save</button></div>
             </form>
           </details>
           {{end}}
-          <form method="post" action="/jobs/delete" onsubmit="return confirm('Delete this job?')" style="display:inline">
+          <form method="post" action="/jobs/delete" onsubmit="return confirm('Delete this job?')">
             <input type="hidden" name="id" value="{{.ID}}">
             <button class="secondary">Delete</button>
           </form>
+          </div>
         </td>
       </tr>
     {{end}}
@@ -66,4 +100,13 @@
   <p class="muted">No jobs yet. Reminders you set in chat also appear here.</p>
   {{end}}
 </div>
+<script>
+// Show the Telegram chat-id field only when "A Telegram chat…" is the chosen
+// delivery destination, scoped to the select's own form.
+function tgToggle(sel){
+  var f = sel.closest('form') || document;
+  var w = f.querySelector('.tgchatwrap');
+  if (w) w.style.display = (sel.value === 'tg') ? '' : 'none';
+}
+</script>
 {{template "footer" .}}{{end}}

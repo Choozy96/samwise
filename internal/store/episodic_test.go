@@ -56,10 +56,10 @@ func TestMemoryIndexesAndPagination(t *testing.T) {
 	uid, _ := db.CreateUser(ctx, "alice", "h", true)
 
 	for i := 0; i < 5; i++ {
-		_, _ = db.SaveSemantic(ctx, uid, "work", "fact", "w"+string(rune('a'+i)), "test")
+		_, _ = db.SaveSemantic(ctx, uid, 0, "work", "fact", "w"+string(rune('a'+i)), "test")
 	}
-	_, _ = db.SaveSemantic(ctx, uid, "health", "fact", "h1", "test")
-	_, _ = db.SaveSemantic(ctx, uid, "", "fact", "untagged", "test") // excluded from topic index
+	_, _ = db.SaveSemantic(ctx, uid, 0, "health", "fact", "h1", "test")
+	_, _ = db.SaveSemantic(ctx, uid, 0, "", "fact", "untagged", "test") // excluded from topic index
 
 	tc, err := db.TopicCounts(ctx, uid)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestUpsertEpisodicAndRecent(t *testing.T) {
 	if len(all) != 1 || all[0].Content != "second version groceries" {
 		t.Fatalf("upsert didn't replace in place: %+v", all)
 	}
-	hits, _ := db.SearchMemory(ctx, uid, "groceries", "", "", "", 5)
+	hits, _ := db.SearchMemory(ctx, uid, AllAgents, "groceries", "", "", "", 5)
 	if len(hits) != 1 {
 		t.Errorf("FTS not updated after upsert: %d hits", len(hits))
 	}

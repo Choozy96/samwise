@@ -85,6 +85,13 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 	if mcpConfig == "" {
 		mcpConfig = `{"mcpServers":{}}`
 	}
+	// Pass the config as a 0600 file, never inline on argv (it holds the run
+	// token and decrypted registry credentials; argv is world-readable).
+	mcpPath, mcpCleanup, err := c.writeMCPConfigFile(req, mcpConfig)
+	if err != nil {
+		return nil, err
+	}
+	defer mcpCleanup()
 
 	// Built-in tools: whatever the orchestrator decided for this run (base scoped
 	// set, plus any per-user opt-ins). The same names are added to --allowedTools
@@ -102,7 +109,7 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 		"--verbose",
 		"--tools", builtinTools,
 		"--strict-mcp-config", // ignore the host's inherited MCP servers
-		"--mcp-config", mcpConfig,
+		"--mcp-config", mcpPath,
 		// Full replacement (not append): the orchestrator owns the assistant's
 		// identity and behavior, not Claude Code's default coding
 		// persona.
@@ -127,6 +134,21 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 	// Bash/Read that reaches the SQLite file can't decrypt the secrets stored in
 	// it — the agent should reach data only through the core MCP tools.
 	cmd.Env = agentEnv(req.Env)
+
+	// Per-user isolation: run the agent (and its host tools) as an unprivileged
+	// per-user uid. The per-run files we just wrote (as root) must be readable by
+	// that uid, so chown the .runs dir and those files to it; the rest of the
+	// workspace tree is chowned by the orchestrator before the run.
+	if iso := req.Isolation; iso != nil {
+		for _, p := range []string{filepath.Join(req.Workspace, ".runs"), sysPath, mcpPath} {
+			if err := os.Chown(p, iso.UID, iso.GID); err != nil {
+				return nil, fmt.Errorf("headless: chown %s to run uid: %w", p, err)
+			}
+		}
+		if err := applyIsolation(cmd, iso); err != nil {
+			return nil, err
+		}
+	}
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -272,6 +294,24 @@ func (c *ClaudeHeadless) writeSystemFile(req Request) (string, func(), error) {
 	path := filepath.Join(dir, fmt.Sprintf("run-%d.sys.md", req.RunID))
 	if err := os.WriteFile(path, []byte(req.SystemContext), 0o600); err != nil {
 		return "", func() {}, fmt.Errorf("headless: writing system file: %w", err)
+	}
+	return path, func() { _ = os.Remove(path) }, nil
+}
+
+// writeMCPConfigFile persists the run's mcp-config to a 0600 per-run file and
+// returns its path. The config carries the run's core-MCP bearer token and any
+// decrypted registry credentials, so it must never go on the command line —
+// /proc/<pid>/cmdline is world-readable, which would leak both to other runs'
+// uids. A file (0600, and chowned to the run uid when user isolation is on) is
+// readable only by that run and root.
+func (c *ClaudeHeadless) writeMCPConfigFile(req Request, configJSON string) (string, func(), error) {
+	dir := filepath.Join(req.Workspace, ".runs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", func() {}, fmt.Errorf("headless: run dir: %w", err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("run-%d.mcp.json", req.RunID))
+	if err := os.WriteFile(path, []byte(configJSON), 0o600); err != nil {
+		return "", func() {}, fmt.Errorf("headless: writing mcp config: %w", err)
 	}
 	return path, func() { _ = os.Remove(path) }, nil
 }

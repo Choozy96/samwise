@@ -26,7 +26,7 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 // handleLogin verifies credentials and issues a session. Failures are rate
 // limited per IP and reported with a generic message (no username enumeration).
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.loginLimiter.allow(clientIP(r)) {
+	if !s.loginLimiter.allow(s.clientIP(r)) {
 		s.render(w, r, "login", pageData{"Title": "Sign in", "Flash": "Too many attempts. Wait a minute and try again.", "FlashKind": "error"})
 		return
 	}
@@ -40,14 +40,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		// Audit a failed attempt against a real account (helps spot misuse).
 		if u != nil {
-			_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "login_failed", "web ("+clientIP(r)+")", "denied")
+			_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "login_failed", "web ("+s.clientIP(r)+")", "denied")
 		}
 		s.render(w, r, "login", pageData{"Title": "Sign in", "Flash": "Invalid username or password.", "FlashKind": "error"})
 		return
 	}
 	s.issueSession(w, u.ID)
 	s.log.Info("login", "user_id", u.ID, "username", u.Username)
-	_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "login", "web ("+clientIP(r)+")", "ok")
+	_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "login", "web ("+s.clientIP(r)+")", "ok")
 	http.Redirect(w, r, "/chat", http.StatusSeeOther)
 }
 
@@ -98,7 +98,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	s.issueSession(w, id)
 	s.log.Info("admin account created", "user_id", id, "username", username)
-	_ = s.db.AddAuditEvent(r.Context(), id, 0, "auth", "login", "first admin account · web ("+clientIP(r)+")", "ok")
+	_ = s.db.AddAuditEvent(r.Context(), id, 0, "auth", "login", "first admin account · web ("+s.clientIP(r)+")", "ok")
 	http.Redirect(w, r, "/chat", http.StatusSeeOther)
 }
 

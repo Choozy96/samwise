@@ -141,18 +141,44 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		}
 	}
 
-	// Slash commands (/model, /runtime, /status, /help) work over Telegram too.
-	if text != "" {
-		// A bound bot always speaks as its agent, so /agent switching here would be
-		// misleading — explain instead of silently changing the (unused) active agent.
-		if boundAgent != nil && isAgentSwitch(text) {
-			_ = b.send(ctx, msg.Chat.ID, "This bot is bound to the “"+boundAgent.Name+"” agent, so /agent doesn’t apply here. "+
-				"Use the web portal to switch the agent a bot is bound to.")
-			return
+	// In a group, only members whose own Telegram account is registered with the
+	// assistant may perform write operations; everyone else can chat/read but the
+	// run is read-only (the agent acts as the group's owner, so we don't let a
+	// stranger mutate the owner's memory/jobs or run write-capable tools). Computed
+	// here because it also gates slash commands below.
+	readOnly := false
+	if isGroup(msg.Chat) && msg.From != nil {
+		if paired, perr := b.db.TelegramUserIsPaired(ctx, msg.From.ID); perr == nil && !paired {
+			readOnly = true
 		}
-		if reply, handled := b.orch.TryCommand(ctx, user.ID, text); handled {
-			_ = b.send(ctx, msg.Chat.ID, reply)
-			return
+	}
+
+	// Slash commands (/model, /runtime, /status, /help) work over Telegram too.
+	// commandForChat handles the addressing: in a group it's honoured ONLY when
+	// this bot is explicitly mentioned ("@thisbot /cmd", "/cmd … @thisbot", or
+	// "/cmd@thisbot"); a bare "/cmd" is ignored. The "@bot" mention is stripped so
+	// the parser sees "/cmd". (Not pre-gated on a leading "/", since a leading
+	// mention puts "@bot" first.)
+	{
+		if cmdText, forUs := b.commandForChat(msg.Chat, text); forUs {
+			// Commands mutate the (shared, owner) account — model, runtime, delivery,
+			// memory resets, etc. In a group an unregistered sender may not run them.
+			if readOnly {
+				_ = b.send(ctx, msg.Chat.ID, "🔒 Only registered users can run commands in a group. "+
+					"Pair your own Telegram account with the assistant first (DM the bot).")
+				return
+			}
+			// A bound bot always speaks as its agent, so /agent switching here would
+			// be misleading — explain instead of changing the (unused) active agent.
+			if boundAgent != nil && isAgentSwitch(cmdText) {
+				_ = b.send(ctx, msg.Chat.ID, "This bot is bound to the “"+boundAgent.Name+"” agent, so /agent doesn’t apply here. "+
+					"Use the web portal to switch the agent a bot is bound to.")
+				return
+			}
+			if reply, handled := b.orch.TryCommand(ctx, user.ID, cmdText); handled {
+				_ = b.send(ctx, msg.Chat.ID, reply)
+				return
+			}
 		}
 	}
 
@@ -182,6 +208,9 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		UserMessage:      dispatchText,
 		Attachments:      atts,
 		StoreUserMessage: true,
+		ReadOnly:         readOnly,
+		OriginBotID:      b.botID,
+		OriginChatID:     msg.Chat.ID,
 	}, nil)
 	stopTyping()
 	if err != nil {
@@ -343,12 +372,16 @@ func (b *Bot) groupShouldReply(ctx context.Context, userID int64, msg *Message, 
 }
 
 // addressedInGroup reports whether a group message is directed at this bot: a
-// slash command, a reply to one of the bot's messages, or an @mention of it.
+// command that mentions this bot (leading/trailing/native), a reply to one of the
+// bot's messages, or an @mention of it.
 func (b *Bot) addressedInGroup(msg *Message, text string) bool {
-	t := strings.TrimSpace(text)
-	if strings.HasPrefix(t, "/") {
+	// A command addresses us only when this bot is explicitly mentioned; a bare
+	// "/cmd" (commandForChat → forUs=false in a group) falls through to the
+	// @mention/reply checks below (and isn't an @mention either, so it's ignored).
+	if _, forUs := b.commandForChat(msg.Chat, text); forUs {
 		return true
 	}
+	t := strings.TrimSpace(text)
 	if msg.ReplyToMessage != nil && msg.ReplyToMessage.From != nil &&
 		b.selfID != 0 && msg.ReplyToMessage.From.ID == b.selfID {
 		return true
@@ -357,6 +390,83 @@ func (b *Bot) addressedInGroup(msg *Message, text string) bool {
 		return true
 	}
 	return false
+}
+
+// commandForChat decides whether a message should be handled as a command for
+// THIS bot, and returns the command text with any "@thisbot" addressing stripped
+// (so the parser sees a bare "/cmd …"). Returns forUs=false (and is a no-op) for
+// anything that isn't a command. This bot can be addressed three ways, all
+// equivalent:
+//
+//   - leading mention:  "@thisbot /cmd args"
+//   - trailing mention: "/cmd args @thisbot"
+//   - native target:    "/cmd@thisbot args"  (what Telegram's command menu inserts)
+//
+// Rules:
+//   - DM: a clean "/cmd …" is always ours (there's only one bot in the chat); a
+//     mention is allowed but not required.
+//   - Group: ONLY when this bot is explicitly mentioned (any of the three forms
+//     above). A bare, untargeted "/cmd" in a group is NOT a command for us (it's
+//     ignored, not executed) — this stops the bot acting on stray slashes and
+//     forces a deliberate mention.
+//
+// "@anotherbot" (native target on the command) is never ours, in any chat.
+func (b *Bot) commandForChat(chat *Chat, text string) (stripped string, forUs bool) {
+	t := strings.TrimSpace(text)
+
+	mentioned := false     // this bot explicitly addressed
+	targetedOther := false // "/cmd@otherbot"
+
+	// Leading "@thisbot" mention ("@thisbot /cmd …"): strip it, if it's a whole
+	// token, before looking for the command.
+	if b.username != "" {
+		lead := "@" + b.username
+		if len(t) >= len(lead) && strings.EqualFold(t[:len(lead)], lead) {
+			if rest := t[len(lead):]; rest == "" || rest[0] == ' ' {
+				mentioned = true
+				t = strings.TrimSpace(rest)
+			}
+		}
+	}
+
+	if !strings.HasPrefix(t, "/") {
+		return strings.TrimSpace(text), false // not a command
+	}
+	fields := strings.Fields(t)
+	cmd := fields[0]
+	args := fields[1:]
+
+	// Native target on the command token: "/cmd@bot".
+	if at := strings.IndexByte(cmd, '@'); at >= 0 {
+		target := cmd[at+1:]
+		cmd = cmd[:at]
+		if b.username != "" && strings.EqualFold(target, b.username) {
+			mentioned = true
+		} else {
+			targetedOther = true
+		}
+	}
+	// Trailing/standalone "@thisbot" mention token(s); drop them from the args so
+	// the parser doesn't see the mention as an argument.
+	kept := args[:0]
+	for _, a := range args {
+		if b.username != "" && strings.EqualFold(a, "@"+b.username) {
+			mentioned = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	stripped = cmd
+	if len(kept) > 0 {
+		stripped += " " + strings.Join(kept, " ")
+	}
+
+	if isGroup(chat) {
+		forUs = mentioned && !targetedOther
+	} else {
+		forUs = !targetedOther
+	}
+	return stripped, forUs
 }
 
 // replyContext renders a quoted block describing the message this one replies to,
