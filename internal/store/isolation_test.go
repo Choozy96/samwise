@@ -17,21 +17,21 @@ func TestCrossUserIsolation(t *testing.T) {
 	bob, _ := db.CreateUser(ctx, "bob", "h", false)
 
 	// ── memory ───────────────────────────────────────────────────────────────
-	db.SaveSemantic(ctx, alice, "work", "fact", "alice uses rust", "assistant")
-	bobMem, _ := db.SaveSemantic(ctx, bob, "work", "fact", "bob uses golang widgets", "assistant")
+	db.SaveSemantic(ctx, alice, 0, "work", "fact", "alice uses rust", "assistant")
+	bobMem, _ := db.SaveSemantic(ctx, bob, 0, "work", "fact", "bob uses golang widgets", "assistant")
 
 	// Alice's search never returns Bob's content.
-	hits, _ := db.SearchMemory(ctx, alice, "golang widgets", "", "", "", 10)
+	hits, _ := db.SearchMemory(ctx, alice, AllAgents, "golang widgets", "", "", "", 10)
 	for _, h := range hits {
 		if strings.Contains(h.Content, "bob") {
 			t.Errorf("alice saw bob's memory: %q", h.Content)
 		}
 	}
 	// Alice cannot delete Bob's memory; Bob can.
-	if ok, _ := db.ForgetSemantic(ctx, alice, bobMem); ok {
+	if ok, _ := db.ForgetSemantic(ctx, alice, AllAgents, bobMem); ok {
 		t.Error("alice deleted bob's memory")
 	}
-	if ok, _ := db.ForgetSemantic(ctx, bob, bobMem); !ok {
+	if ok, _ := db.ForgetSemantic(ctx, bob, AllAgents, bobMem); !ok {
 		t.Error("bob could not delete his own memory")
 	}
 
@@ -78,8 +78,8 @@ func TestSearchMemoryNoInjection(t *testing.T) {
 	db := openTestDB(t)
 	alice, _ := db.CreateUser(ctx, "alice", "h", false)
 	bob, _ := db.CreateUser(ctx, "bob", "h", false)
-	db.SaveSemantic(ctx, alice, "t", "fact", "alice apple", "assistant")
-	db.SaveSemantic(ctx, bob, "t", "fact", "bob banana", "assistant")
+	db.SaveSemantic(ctx, alice, 0, "t", "fact", "alice apple", "assistant")
+	db.SaveSemantic(ctx, bob, 0, "t", "fact", "bob banana", "assistant")
 
 	for _, q := range []string{
 		`apple" OR "1"="1`,
@@ -87,7 +87,7 @@ func TestSearchMemoryNoInjection(t *testing.T) {
 		`apple OR user_id = 2`,
 		`banana`, // alice searching for bob's word must still see nothing of bob's
 	} {
-		hits, err := db.SearchMemory(ctx, alice, q, "", "", "", 10)
+		hits, err := db.SearchMemory(ctx, alice, AllAgents, q, "", "", "", 10)
 		if err != nil {
 			t.Errorf("query %q errored (should be sanitized, not fail): %v", q, err)
 		}

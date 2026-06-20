@@ -221,6 +221,19 @@ func (m *Manager) SendBot(ctx context.Context, userID, botID int64, text string)
 	return deliver(ctx, client, chatID, text, format, m.log)
 }
 
+// SendToChat delivers to an explicit bot+chat (a job's chosen destination).
+func (m *Manager) SendToChat(ctx context.Context, userID, botID, chatID int64, text string) error {
+	client := m.clientFor(botID)
+	if client == nil {
+		return errNoBot(userID)
+	}
+	format := FormatMarkdown
+	if st, serr := m.db.GetSettings(ctx, userID); serr == nil && st.TgFormat != "" {
+		format = st.TgFormat
+	}
+	return deliver(ctx, client, chatID, text, format, m.log)
+}
+
 // primaryBot picks the user's primary bot: the first running bot they're paired
 // to, iterating identities by bot_id (so the legacy bot, id 0, is preferred).
 func (m *Manager) primaryBot(ctx context.Context, userID int64) (int64, bool) {

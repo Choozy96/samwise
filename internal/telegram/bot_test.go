@@ -12,24 +12,69 @@ import (
 )
 
 // TestAddressedInGroup checks the "is this group message directed at me?" logic.
+// In a group a slash command counts as addressing the bot ONLY when it explicitly
+// mentions this bot — a bare "/help" does not.
 func TestAddressedInGroup(t *testing.T) {
 	bot := &Bot{username: "MyBot", selfID: 42}
+	grp := &Chat{Type: "supergroup"}
 	cases := []struct {
 		name string
 		msg  *Message
 		text string
 		want bool
 	}{
-		{"command", &Message{}, "/help", true},
-		{"mention", &Message{}, "hey @mybot what's up", true},      // case-insensitive
-		{"mention midword no", &Message{}, "email me@mybot", true}, // contains @mybot substring — acceptable
-		{"reply to bot", &Message{ReplyToMessage: &Message{From: &User{ID: 42}}}, "thanks", true},
-		{"plain chatter", &Message{}, "just talking to friends", false},
-		{"reply to someone else", &Message{ReplyToMessage: &Message{From: &User{ID: 99}}}, "ok", false},
+		{"bare command not addressed", &Message{Chat: grp}, "/help", false},          // must mention now
+		{"command for us (native)", &Message{Chat: grp}, "/help@MyBot", true},         // case-insensitive
+		{"command trailing mention", &Message{Chat: grp}, "/remind 5pm @MyBot", true}, // mention after args
+		{"command leading mention", &Message{Chat: grp}, "@MyBot /remind 5pm", true},  // mention before cmd
+		{"command for another bot", &Message{Chat: grp}, "/help@OtherBot", false},     // must NOT trigger us
+		{"mention", &Message{Chat: grp}, "hey @mybot what's up", true},                // case-insensitive
+		{"mention midword no", &Message{Chat: grp}, "email me@mybot", true},           // contains @mybot substring — acceptable
+		{"reply to bot", &Message{Chat: grp, ReplyToMessage: &Message{From: &User{ID: 42}}}, "thanks", true},
+		{"plain chatter", &Message{Chat: grp}, "just talking to friends", false},
+		{"reply to someone else", &Message{Chat: grp, ReplyToMessage: &Message{From: &User{ID: 99}}}, "ok", false},
 	}
 	for _, c := range cases {
 		if got := bot.addressedInGroup(c.msg, c.text); got != c.want {
 			t.Errorf("%s: addressedInGroup=%v want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestCommandForChat checks command targeting: in a DM a clean command is ours; in
+// a group only an explicitly-mentioned command is, and the "@bot" addressing
+// (native or trailing) is stripped for parsing.
+func TestCommandForChat(t *testing.T) {
+	b := &Bot{username: "MyBot"}
+	dm := &Chat{Type: "private"}
+	grp := &Chat{Type: "supergroup"}
+	cases := []struct {
+		name      string
+		chat      *Chat
+		in        string
+		wantStrip string
+		wantForUs bool
+	}{
+		// DM: a clean command is always ours.
+		{"dm bare", dm, "/help", "/help", true},
+		{"dm native target us", dm, "/help@MyBot", "/help", true},
+		{"dm native target other", dm, "/help@OtherBot", "/help", false},
+		{"dm args", dm, "/remind 5pm tea", "/remind 5pm tea", true},
+		{"dm leading mention", dm, "@MyBot /help", "/help", true},
+		// Group: must explicitly mention this bot — any of the three forms.
+		{"grp bare not ours", grp, "/help", "/help", false},
+		{"grp native us", grp, "/help@MyBot", "/help", true},
+		{"grp native other", grp, "/help@OtherBot", "/help", false},
+		{"grp trailing mention", grp, "/remind 5pm tea @MyBot", "/remind 5pm tea", true},
+		{"grp leading mention", grp, "@MyBot /remind 5pm tea", "/remind 5pm tea", true},
+		{"grp leading mention bare", grp, "@mybot /help", "/help", true}, // case-insensitive
+		{"grp native us + args", grp, "/remind@mybot 5pm tea", "/remind 5pm tea", true},
+		{"grp mention but not a command", grp, "@MyBot hello there", "@MyBot hello there", false},
+	}
+	for _, c := range cases {
+		gotStrip, gotForUs := b.commandForChat(c.chat, c.in)
+		if gotStrip != c.wantStrip || gotForUs != c.wantForUs {
+			t.Errorf("%s: commandForChat(%q) = (%q,%v), want (%q,%v)", c.name, c.in, gotStrip, gotForUs, c.wantStrip, c.wantForUs)
 		}
 	}
 }

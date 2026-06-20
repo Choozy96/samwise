@@ -58,7 +58,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auth.VerifyPassword(current, full.PasswordHash); err != nil {
-		_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "password_change", "web ("+clientIP(r)+")", "denied")
+		_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "password_change", "web ("+s.clientIP(r)+")", "denied")
 		fail("Current password is incorrect.")
 		return
 	}
@@ -85,7 +85,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("password changed", "user_id", u.ID, "username", u.Username)
-	_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "password_change", "web ("+clientIP(r)+")", "ok")
+	_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "password_change", "web ("+s.clientIP(r)+")", "ok")
 	http.Redirect(w, r, "/settings?pw=1", http.StatusSeeOther)
 }
 

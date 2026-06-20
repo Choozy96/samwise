@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -33,7 +34,32 @@ type Config struct {
 	MasterKey       []byte // 32-byte AES key for encrypting DB-stored secrets (may be nil in dev)
 	SessionKey      []byte // HMAC key for signed session cookies (auto-generated in dev if unset)
 
+	// AgentIsolation runs each agent's host tools (bash/read/…) as a distinct,
+	// unprivileged per-user OS uid so one user's run cannot read another user's
+	// workspace or the database. Requires the process to run as root on Linux
+	// (the container does); a no-op with a warning elsewhere (e.g. native dev).
+	// Defaults on in prod, off for native dev; override with AGENT_ISOLATION.
+	AgentIsolation bool
+	// AgentUIDBase is the base for per-user run uids/gids: user N runs as
+	// AgentUIDBase+N. Default 20000. Must not collide with the app uid (10001).
+	AgentUIDBase int
+	// AgentCredGID is a shared gid added to every run so the agent can still read
+	// the shared claude.ai credentials dir while being unable to read the DB.
+	AgentCredGID int
+
 	TelegramBotToken string // MVP step 6; empty until configured
+
+	// TrustProxy makes the portal derive the client IP from the X-Forwarded-For
+	// header (for login rate-limiting and audit). Enable ONLY when the app sits
+	// behind a trusted reverse proxy (e.g. the bundled nginx) and is not directly
+	// reachable — otherwise a client could spoof the header. Default off.
+	TrustProxy bool
+
+	// CookieSecure marks session cookies Secure (HTTPS-only). Defaults to on in
+	// prod. Set false ONLY when intentionally serving the portal over plain HTTP
+	// (e.g. on a private network), otherwise the browser won't send the cookie
+	// over http:// and login silently fails.
+	CookieSecure bool
 }
 
 // Load reads configuration from the environment, first sourcing an optional
@@ -65,6 +91,11 @@ func Load(envPath string) (*Config, error) {
 	}
 
 	c.AllowAgentTools = getenvBool("ALLOW_AGENT_TOOLS", c.IsProd())
+	c.AgentIsolation = getenvBool("AGENT_ISOLATION", c.IsProd())
+	c.AgentUIDBase = getenvInt("AGENT_UID_BASE", 20000)
+	c.AgentCredGID = getenvInt("AGENT_CRED_GID", 10002)
+	c.TrustProxy = getenvBool("TRUST_PROXY", false)
+	c.CookieSecure = getenvBool("COOKIE_SECURE", c.IsProd())
 
 	if err := c.resolveSessionKey(); err != nil {
 		return nil, err
@@ -84,6 +115,19 @@ func getenvBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// getenvInt parses an integer env var, falling back to def on empty/invalid.
+func getenvInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 // IsProd reports whether the app is running in production mode.

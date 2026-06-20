@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ type ChannelSender interface {
 	Send(ctx context.Context, userID int64, text string) error
 	SendAgent(ctx context.Context, userID, agentID int64, text string) error
 	SendBot(ctx context.Context, userID, botID int64, text string) error
+	// SendToChat delivers to an explicit bot+chat (a specific paired chat chosen
+	// as a job's delivery destination).
+	SendToChat(ctx context.Context, userID, botID, chatID int64, text string) error
 }
 
 // SetTelegramSender wires the Telegram delivery sink (MVP step 6). Until set,
@@ -85,21 +89,62 @@ func (o *Orchestrator) DeliverToUser(ctx context.Context, userID int64, text str
 // channel this is a no-op (it's visible in chat) — avoiding a double-store. For
 // Telegram it routes to the bot bound to the run's agent (agentName ""/unknown
 // => the user's primary bot).
-func (o *Orchestrator) DeliverRunResult(ctx context.Context, userID int64, agentName, text string) error {
-	s, err := o.db.GetSettings(ctx, userID)
-	if err != nil {
-		return err
-	}
-	if s.DeliveryChannel == "telegram" {
-		if o.telegram != nil {
+func (o *Orchestrator) DeliverRunResult(ctx context.Context, userID int64, agentName, delivery, text string) error {
+	switch {
+	case strings.HasPrefix(delivery, "tg:"):
+		// A specific paired chat chosen for this job.
+		if botID, chatID, ok := parseTGDelivery(delivery); ok && o.telegram != nil {
+			return o.telegram.SendToChat(ctx, userID, botID, chatID, text)
+		}
+		return o.postToWebChat(ctx, userID, agentName, text) // fallback if unavailable
+	case delivery == "web":
+		return o.postToWebChat(ctx, userID, agentName, text)
+	default:
+		// "" → the user's default delivery channel.
+		s, err := o.db.GetSettings(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if s.DeliveryChannel == "telegram" && o.telegram != nil {
 			if agentID := o.agentIDForName(ctx, userID, agentName); agentID != 0 {
 				return o.telegram.SendAgent(ctx, userID, agentID, text)
 			}
 			return o.telegram.Send(ctx, userID, text)
 		}
-		o.log.Warn("telegram delivery not configured; agent_run result is in web chat", "user_id", userID)
+		return o.postToWebChat(ctx, userID, agentName, text)
 	}
-	return nil // web: already stored by Dispatch
+}
+
+// parseTGDelivery parses "tg:<botID>:<chatID>".
+func parseTGDelivery(s string) (botID, chatID int64, ok bool) {
+	parts := strings.Split(s, ":")
+	if len(parts) != 3 || parts[0] != "tg" {
+		return 0, 0, false
+	}
+	b, e1 := strconv.ParseInt(parts[1], 10, 64)
+	c, e2 := strconv.ParseInt(parts[2], 10, 64)
+	if e1 != nil || e2 != nil {
+		return 0, 0, false
+	}
+	return b, c, true
+}
+
+// postToWebChat delivers a scheduled-job result into the user's interactive web
+// conversation so it's visible there (isolated task runs write to a hidden task
+// thread, so the result must be posted here explicitly).
+func (o *Orchestrator) postToWebChat(ctx context.Context, userID int64, agentName, text string) error {
+	agentID := o.agentIDForName(ctx, userID, agentName)
+	if agentID == 0 {
+		if a, err := o.db.GetActiveAgent(ctx, userID); err == nil {
+			agentID = a.ID
+		}
+	}
+	conv, err := o.db.GetOrCreateConversation(ctx, userID, "web", agentID)
+	if err != nil {
+		return err
+	}
+	_, err = o.db.AddMessage(ctx, conv.ID, userID, "web", "assistant", text)
+	return err
 }
 
 // agentIDForName resolves a job's agent name to an id, falling back to the user's
@@ -135,6 +180,7 @@ func (o *Orchestrator) RunAgentJob(ctx context.Context, userID int64, prompt, ag
 		Agent:            agent,
 		UserMessage:      prompt,
 		StoreUserMessage: false,
+		Isolated:         true, // its own thread, no chat transcript, no merge with live messages
 	}, nil)
 }
 

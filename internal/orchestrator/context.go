@@ -86,7 +86,12 @@ func (o *Orchestrator) assemble(ctx context.Context, user *store.User, settings 
 
 	// Relevance tier: FTS top-K over semantic facts + older episodic, driven by
 	// the incoming message. Episodic hits already in the recent window are skipped.
-	if hits, err := o.db.SearchMemory(ctx, user.ID, incoming, "", "", "", settings.RetrievalK); err != nil {
+	// Retrieve user memory plus this agent's own; never another agent's.
+	agentScope := int64(0)
+	if agent != nil {
+		agentScope = agent.ID
+	}
+	if hits, err := o.db.SearchMemory(ctx, user.ID, agentScope, incoming, "", "", "", settings.RetrievalK); err != nil {
 		o.log.Error("memory retrieval", "err", err)
 	} else if len(hits) > 0 {
 		wrote := false

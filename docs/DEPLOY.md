@@ -89,6 +89,32 @@ volume — **your data persists across restarts and rebuilds** (only
 
 Then open `http://localhost:8080` and create the admin account.
 
+### Multi-user isolation (`AGENT_ISOLATION`)
+
+If more than one person uses the assistant, the agent's host tools (`Bash`,
+`Read`, …) must not let one user reach another's data. With `AGENT_ISOLATION`
+on — the **default in the Docker image** — the container starts as root and runs
+**each agent turn as a distinct unprivileged per-user uid**, so the kernel keeps
+each user to their own `/data/workspaces/<id>` and blocks all access to the
+database and other users' files. No action needed; it's on by default.
+
+What this means operationally:
+
+- The main process runs as **root inside the container** (it drops each agent run
+  to an unprivileged uid). This is contained by the container; don't also run the
+  container `--privileged`, and keep the portal off the public internet (below).
+- It needs **Linux + root**, which the container provides. On native dev it
+  auto-disables with a warning and the app runs as a single unprivileged user.
+- To turn it off (e.g. a strictly single-user box where you'd rather the whole
+  app stay non-root), set `AGENT_ISOLATION=false`; the entrypoint then drops the
+  app to uid 10001 as before. `AGENT_UID_BASE` (default 20000) and
+  `AGENT_CRED_GID` (default 10002) rarely need changing.
+- The owner's single claude.ai subscription is **shared by all users by design**;
+  the agent can read its own auth token. Per-user API keys are the alternative if
+  you don't want that — not wired today.
+
+See `SECURITY.md` for the full model and residuals.
+
 ## Deploy to a VPS (GCP, etc.)
 
 ### Pick an instance (Google Cloud)
@@ -245,7 +271,8 @@ Three things are **not** in the image and must exist on the **VPS filesystem**
 1. **`.env`** — create it on the VPS (`cp .env.example .env`, fill the keys).
 2. **`./secrets/claude/.credentials.json`** — copy it up from a machine where
    you're logged into `claude` (the VPS is headless; you can't `claude login` there).
-3. **`./Caddyfile`** — only if you enable the TLS proxy.
+3. **`./nginx/`** (the `templates/` config + `init-letsencrypt.sh`) — only if
+   you enable the TLS proxy.
 
 You therefore don't need the full repo on the VPS to *build* — just
 `docker-compose.yml` plus those mounted files. A shallow `git clone` (or even
@@ -276,10 +303,50 @@ The portal is **plain HTTP** with logins + personal data. Compose binds it to
   is SSH *local* forwarding. A true **reverse** tunnel — `ssh -R` initiated *from*
   the VPS — is only needed if the VPS itself can't accept inbound connections,
   e.g. it's behind NAT; a GCP VM with a public IP doesn't need it.)
-- **TLS reverse proxy:** for always-on access from any device. Uncomment the
-  `caddy` service in `docker-compose.yml`, point a domain at the VPS, create a
-  `Caddyfile`, and open the firewall for **80 + 443 only** (keep 8080 closed).
-  Caddy auto-provisions a cert.
+- **TLS reverse proxy (HTTPS via Let's Encrypt — recommended for 2+ users):**
+  the bundled **nginx + certbot** services terminate TLS and auto-renew the
+  certificate. It's an opt-in compose profile, so it only runs when you ask.
+  Steps:
+
+  1. **Get a domain** and add a DNS **A record** → your VPS's public IP. (No
+     domain? A free `*.duckdns.org` works.) Let's Encrypt won't issue for a bare
+     IP, so a hostname is required.
+  2. In `.env`:
+
+     ```sh
+     SITE_ADDRESS=samwise.example.com   # your domain
+     CERTBOT_EMAIL=you@example.com      # renewal notices (optional)
+     TRUST_PROXY=true                   # read real client IP from the proxy
+     ```
+  3. **Firewall:** open **80 + 443 only** (80 is needed for the ACME challenge
+     and the HTTP→HTTPS redirect); keep **8080 closed** — it stays loopback-only
+     and nginx reaches the app over the internal network.
+
+     ```sh
+     gcloud compute firewall-rules create samwise-web \
+       --allow=tcp:80,tcp:443 --target-tags=samwise --direction=INGRESS
+     # (tag your instance with `samwise`, or use your own targeting)
+     ```
+  4. **Get the first certificate** (one-time; handles the nginx/cert
+     chicken-and-egg by issuing a temporary self-signed cert, then the real one):
+
+     ```sh
+     sh nginx/init-letsencrypt.sh        # uses SITE_ADDRESS/CERTBOT_EMAIL from .env
+     ```
+
+     Tip: set `CERTBOT_STAGING=1` in `.env` for a dry run against Let's Encrypt's
+     staging CA first (its rate limits are strict), then unset it and re-run.
+  5. Bring it up:
+
+     ```sh
+     docker compose --profile tls up -d
+     docker compose logs -f nginx certbot
+     ```
+
+  Then browse `https://samwise.example.com`. The cert lives in the
+  `certbot-conf` volume; the `certbot` container renews it and nginx reloads
+  every 6h to pick it up. (The default `docker compose up`, without
+  `--profile tls`, is unchanged — no proxy, portal stays private.)
 - **Tailscale:** join the VPS to your tailnet and reach `http://<tailscale-ip>:8080`
   privately (change the port binding to the tailscale interface).
 - **Firewall to your IP:** restrict 8080 to your home IP (least good — still plain

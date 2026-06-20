@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 )
 
 // ChannelIdentity links an external sender to an app user. BotID
@@ -34,6 +35,21 @@ func (db *DB) GetIdentityByExternal(ctx context.Context, channel string, botID i
 		return nil, err
 	}
 	return &c, nil
+}
+
+// TelegramUserIsPaired reports whether a Telegram user id is paired to an account
+// (i.e. has a DM identity, whose external_id is the user's positive Telegram id;
+// group identities use the negative chat id and never match). Used to gate write
+// operations in group chats to registered users.
+func (db *DB) TelegramUserIsPaired(ctx context.Context, telegramID int64) (bool, error) {
+	var exists int
+	err := db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM channel_identities WHERE channel = 'telegram' AND external_id = ?)`,
+		strconv.FormatInt(telegramID, 10)).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists == 1, nil
 }
 
 // GetIdentityByUserBot returns a user's identity on a specific bot (for delivery).

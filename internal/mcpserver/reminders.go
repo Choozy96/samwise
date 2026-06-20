@@ -43,6 +43,9 @@ func (h *handlers) registerReminders(s *mcp.Server) {
 }
 
 func (h *handlers) reminderSet(ctx context.Context, _ *mcp.CallToolRequest, in reminderSetIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("reminder_set"), nil, nil
+	}
 	msg := strings.TrimSpace(in.Message)
 	if msg == "" {
 		return h.fail("reminder_set", "", "message is required"), nil, nil
@@ -128,6 +131,9 @@ func (h *handlers) reminderList(ctx context.Context, _ *mcp.CallToolRequest, _ e
 }
 
 func (h *handlers) reminderCancel(ctx context.Context, _ *mcp.CallToolRequest, in reminderCancelIn) (*mcp.CallToolResult, any, error) {
+	if h.readOnly {
+		return h.denyWrite("reminder_cancel"), nil, nil
+	}
 	j, err := h.db.GetJob(ctx, h.userID, in.ID)
 	if err != nil {
 		return h.fail("reminder_cancel", fmt.Sprintf("id=%d", in.ID), "no such reminder"), nil, nil

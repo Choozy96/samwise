@@ -1,6 +1,6 @@
 {{define "memory"}}{{template "header" .}}
 <h1>Memory</h1>
-<p class="muted">What your assistant remembers about you — browse by topic or date, or search. Only you can see or edit this.</p>
+<p class="muted">What your assistant remembers about you — browse by topic or date, or search. Only you can see or edit this. <strong>User</strong> memory is shared by all your agents; agent-scoped memory is seen only by that agent.</p>
 
 <form method="get" action="/memory" style="margin:.5rem 0 1rem">
   <input name="q" value="{{.Query}}" placeholder="Search all memory…" style="width:55%; max-width:30rem">
@@ -11,8 +11,8 @@
 {{if eq .View "search"}}
   <h2>Results for "{{.Query}}"</h2>
   {{if .Hits}}
-  <div class="table-wrap"><table><thead><tr><th>Layer</th><th>Topic</th><th>Content</th><th>When</th></tr></thead><tbody>
-    {{range .Hits}}<tr><td><span class="pill">{{.Layer}}</span></td><td>{{.Topic}}</td><td>{{.Content}}</td><td class="muted">{{.TS}}</td></tr>{{end}}
+  <div class="table-wrap"><table class="sortable"><thead><tr><th>Layer</th><th>Scope</th><th>Topic</th><th>Content</th><th>When</th></tr></thead><tbody>
+    {{range .Hits}}<tr><td><span class="pill">{{.Layer}}</span></td><td class="muted">{{if .AgentID}}{{index $.AgentNames .AgentID}}{{else}}User{{end}}</td><td>{{.Topic}}</td><td class="wrap-cell">{{.Content}}</td><td class="muted">{{.TS}}</td></tr>{{end}}
   </tbody></table></div>
   {{else}}<p class="muted">No matches.</p>{{end}}
 
@@ -20,8 +20,15 @@
   <p><a href="/memory">← All memory</a></p>
   <h2>Topic: <code>{{.Topic}}</code></h2>
   {{if .Semantic}}
-  <div class="table-wrap"><table><thead><tr><th>Content</th><th>Kind</th><th>Created</th><th></th></tr></thead><tbody>
-    {{range .Semantic}}{{template "semrow" .}}{{end}}
+  <div class="table-wrap"><table class="sortable"><thead><tr><th>Content</th><th>Kind</th><th data-nosort>Scope</th><th>Created</th><th></th></tr></thead><tbody>
+    {{$back := printf "/memory?topic=%s" .Topic}}
+    {{range .Semantic}}<tr>
+      <td class="wrap-cell">{{.Content}}</td>
+      <td><span class="pill">{{.Kind}}</span></td>
+      <td>{{$cur := .AgentID}}<form method="post" action="/memory/scope" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="{{$back}}"><select name="scope" class="scope-sel" onchange="this.form.submit()" title="Move this memory's scope"><option value="0"{{if not $cur}} selected{{end}}>User (shared)</option>{{range $.Agents}}<option value="{{.ID}}"{{if eq .ID $cur}} selected{{end}}>{{.Name}}</option>{{end}}</select></form></td>
+      <td class="muted">{{.CreatedAt}}</td>
+      <td><form method="post" action="/memory/delete" onsubmit="return confirm('Delete this memory?')" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="{{$back}}"><button class="secondary">Delete</button></form></td>
+    </tr>{{end}}
   </tbody></table></div>
   <div style="margin-top:.6rem; display:flex; gap:1rem; align-items:center">
     {{if gt .Page 1}}<a href="/memory?topic={{.Topic}}&page={{.PrevPage}}">← Prev</a>{{end}}
@@ -66,8 +73,15 @@
 
   {{if .Semantic}}
   <h2 style="margin-top:1rem">Recent facts</h2>
-  <div class="table-wrap"><table><thead><tr><th>Content</th><th>Topic</th><th>Kind</th><th>Created</th><th></th></tr></thead><tbody>
-    {{range .Semantic}}{{template "semrowt" .}}{{end}}
+  <div class="table-wrap"><table class="sortable"><thead><tr><th>Content</th><th>Topic</th><th>Kind</th><th data-nosort>Scope</th><th>Created</th><th></th></tr></thead><tbody>
+    {{range .Semantic}}<tr>
+      <td class="wrap-cell">{{.Content}}</td>
+      <td>{{.Topic}}</td>
+      <td><span class="pill">{{.Kind}}</span></td>
+      <td>{{$cur := .AgentID}}<form method="post" action="/memory/scope" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="/memory"><select name="scope" class="scope-sel" onchange="this.form.submit()" title="Move this memory's scope"><option value="0"{{if not $cur}} selected{{end}}>User (shared)</option>{{range $.Agents}}<option value="{{.ID}}"{{if eq .ID $cur}} selected{{end}}>{{.Name}}</option>{{end}}</select></form></td>
+      <td class="muted">{{.CreatedAt}}</td>
+      <td><form method="post" action="/memory/delete" onsubmit="return confirm('Delete this memory?')" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="/memory"><button class="secondary">Delete</button></form></td>
+    </tr>{{end}}
   </tbody></table></div>
   {{end}}
 {{end}}
@@ -80,12 +94,13 @@
     <div class="row">
       <div><label for="topic">Topic</label><input id="topic" name="topic" placeholder="e.g. preferences"></div>
       <div><label for="kind">Kind</label><select id="kind" name="kind"><option value="fact">fact</option><option value="preference">preference</option><option value="event">event</option></select></div>
+      <div><label for="scope">Scope</label>
+        <select id="scope" name="scope">
+          <option value="0">User (all agents)</option>
+          {{range .Agents}}<option value="{{.ID}}">{{.Name}} (this agent only)</option>{{end}}
+        </select></div>
     </div>
     <div style="margin-top:.75rem"><button type="submit">Save</button></div>
   </form>
 </div>
 {{template "footer" .}}{{end}}
-
-{{define "semrow"}}<tr><td>{{.Content}}</td><td><span class="pill">{{.Kind}}</span></td><td class="muted">{{.CreatedAt}}</td><td><form method="post" action="/memory/delete" onsubmit="return confirm('Delete this memory?')" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form></td></tr>{{end}}
-
-{{define "semrowt"}}<tr><td>{{.Content}}</td><td>{{.Topic}}</td><td><span class="pill">{{.Kind}}</span></td><td class="muted">{{.CreatedAt}}</td><td><form method="post" action="/memory/delete" onsubmit="return confirm('Delete this memory?')" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form></td></tr>{{end}}

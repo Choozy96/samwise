@@ -40,13 +40,13 @@ func (s *Server) handleOnboardingSave(w http.ResponseWriter, r *http.Request) {
 	// Memory: replace any prior onboarding-sourced entries, then seed fresh.
 	_ = s.db.DeleteSemanticBySource(ctx, u.ID, "onboarding")
 	if v := strings.TrimSpace(r.FormValue("call_name")); v != "" {
-		_, _ = s.db.SaveSemantic(ctx, u.ID, "profile", "preference", "Address the user as "+v+".", "onboarding")
+		_, _ = s.db.SaveSemantic(ctx, u.ID, 0, "profile", "preference", "Address the user as "+v+".", "onboarding")
 	}
 	if v := strings.TrimSpace(r.FormValue("about")); v != "" {
-		_, _ = s.db.SaveSemantic(ctx, u.ID, "about-me", "fact", v, "onboarding")
+		_, _ = s.db.SaveSemantic(ctx, u.ID, 0, "about-me", "fact", v, "onboarding")
 	}
 	if v := strings.TrimSpace(r.FormValue("style")); v != "" {
-		_, _ = s.db.SaveSemantic(ctx, u.ID, "style", "preference", v, "onboarding")
+		_, _ = s.db.SaveSemantic(ctx, u.ID, 0, "style", "preference", v, "onboarding")
 	}
 
 	// Default agent: optional rename + persona (composed with operational rules).

@@ -35,7 +35,20 @@ type Conversation struct {
 // channel is recorded only as where the thread originated. Switching agent
 // switches conversation.
 func (db *DB) GetOrCreateConversation(ctx context.Context, userID int64, channel string, agentID int64) (*Conversation, error) {
-	c, err := db.latestConversation(ctx, userID, agentID)
+	return db.getOrCreateConversation(ctx, userID, channel, agentID, "interactive")
+}
+
+// GetOrCreateTaskConversation returns the per-(user,agent) thread used by isolated
+// scheduled runs (agent_run jobs). It is kept separate from the interactive chat
+// so a task never reads the conversation transcript or writes into it — which
+// also stops a task from merging its reply with a chat message that fires at the
+// same time.
+func (db *DB) GetOrCreateTaskConversation(ctx context.Context, userID, agentID int64) (*Conversation, error) {
+	return db.getOrCreateConversation(ctx, userID, "task", agentID, "task")
+}
+
+func (db *DB) getOrCreateConversation(ctx context.Context, userID int64, channel string, agentID int64, kind string) (*Conversation, error) {
+	c, err := db.latestConversation(ctx, userID, agentID, kind)
 	if err == nil {
 		return c, nil
 	}
@@ -43,7 +56,7 @@ func (db *DB) GetOrCreateConversation(ctx context.Context, userID int64, channel
 		return nil, err
 	}
 	res, err := db.ExecContext(ctx,
-		`INSERT INTO conversations(user_id, channel, agent_id) VALUES(?,?,?)`, userID, channel, agentID)
+		`INSERT INTO conversations(user_id, channel, agent_id, kind) VALUES(?,?,?,?)`, userID, channel, agentID, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -54,14 +67,14 @@ func (db *DB) GetOrCreateConversation(ctx context.Context, userID int64, channel
 	return &Conversation{ID: id, UserID: userID, Channel: channel, AgentID: agentID}, nil
 }
 
-func (db *DB) latestConversation(ctx context.Context, userID, agentID int64) (*Conversation, error) {
+func (db *DB) latestConversation(ctx context.Context, userID, agentID int64, kind string) (*Conversation, error) {
 	var c Conversation
 	var sess sql.NullString
 	var aid sql.NullInt64
 	err := db.QueryRowContext(ctx,
 		`SELECT id, user_id, channel, COALESCE(agent_id,0), harness_session_id, summary, summary_msg_count
-		   FROM conversations WHERE user_id = ? AND COALESCE(agent_id,0) = ?
-		  ORDER BY id DESC LIMIT 1`, userID, agentID).
+		   FROM conversations WHERE user_id = ? AND COALESCE(agent_id,0) = ? AND kind = ?
+		  ORDER BY id DESC LIMIT 1`, userID, agentID, kind).
 		Scan(&c.ID, &c.UserID, &c.Channel, &aid, &sess, &c.Summary, &c.SummaryMsgCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

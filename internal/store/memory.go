@@ -6,9 +6,17 @@ import (
 	"strings"
 )
 
-// SemanticMemory is one discrete fact/preference/event.
+// AllAgents is an agent-scope sentinel meaning "every scope" (user memory plus
+// all agents'), used by user-facing surfaces (the portal editor, /recall) that
+// should see everything. A run uses its own agent id so it sees only user memory
+// plus its own.
+const AllAgents int64 = -1
+
+// SemanticMemory is one discrete fact/preference/event. AgentID 0 means
+// user-scoped (shared across the user's agents); >0 means specific to that agent.
 type SemanticMemory struct {
 	ID        int64
+	AgentID   int64
 	Topic     string
 	Kind      string
 	Content   string
@@ -26,25 +34,62 @@ type EpisodicMemory struct {
 	CreatedAt  string
 }
 
-// MemoryHit is a retrieval result spanning either memory layer.
+// MemoryHit is a retrieval result spanning either memory layer. AgentID 0 means
+// user-scoped (or episodic, which is always user-scoped).
 type MemoryHit struct {
 	Layer   string // semantic | episodic
 	RefID   int64
+	AgentID int64
 	Topic   string
 	Kind    string
 	Content string
 	TS      string
 }
 
-// SaveSemantic stores a semantic memory row and returns its id.
-func (db *DB) SaveSemantic(ctx context.Context, userID int64, topic, kind, content, source string) (int64, error) {
+// nullAgent renders an agent id for SQL: a positive id, else NULL (user-scoped).
+func nullAgent(agentID int64) any {
+	if agentID > 0 {
+		return agentID
+	}
+	return nil
+}
+
+// scopeFilter returns an SQL fragment + args limiting semantic rows to a scope:
+// a specific agent (user memory + that agent's), user-only (agentScope 0), or all
+// scopes (AllAgents → no filter). col is the agent_id column for the query.
+func scopeFilter(col string, agentScope int64) (string, []any) {
+	if agentScope == AllAgents {
+		return "", nil
+	}
+	if agentScope <= 0 {
+		return " AND " + col + " IS NULL", nil
+	}
+	return " AND (" + col + " IS NULL OR " + col + " = ?)", []any{agentScope}
+}
+
+// SaveSemantic stores a semantic memory row and returns its id. agentID 0 saves
+// user-scoped (shared) memory; >0 scopes it to that agent.
+func (db *DB) SaveSemantic(ctx context.Context, userID, agentID int64, topic, kind, content, source string) (int64, error) {
 	res, err := db.ExecContext(ctx,
-		`INSERT INTO memory_semantic(user_id, topic, kind, content, source)
-		 VALUES(?,?,?,?,?)`, userID, topic, kind, content, source)
+		`INSERT INTO memory_semantic(user_id, agent_id, topic, kind, content, source)
+		 VALUES(?,?,?,?,?,?)`, userID, nullAgent(agentID), topic, kind, content, source)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// SetSemanticScope moves a user's semantic memory between user-scope (agentID 0)
+// and a specific agent. Reports whether a row changed.
+func (db *DB) SetSemanticScope(ctx context.Context, userID, id, agentID int64) (bool, error) {
+	res, err := db.ExecContext(ctx,
+		`UPDATE memory_semantic SET agent_id = ? WHERE id = ? AND user_id = ?`,
+		nullAgent(agentID), id, userID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // SaveEpisodic stores a dated episodic distillation row and returns its id.
@@ -60,9 +105,11 @@ func (db *DB) SaveEpisodic(ctx context.Context, userID int64, periodType, period
 
 // ForgetSemantic deletes a semantic memory the user owns, reporting whether a
 // row was removed.
-func (db *DB) ForgetSemantic(ctx context.Context, userID, id int64) (bool, error) {
+func (db *DB) ForgetSemantic(ctx context.Context, userID, agentScope, id int64) (bool, error) {
+	clause, args := scopeFilter("agent_id", agentScope)
 	res, err := db.ExecContext(ctx,
-		`DELETE FROM memory_semantic WHERE id = ? AND user_id = ?`, id, userID)
+		`DELETE FROM memory_semantic WHERE id = ? AND user_id = ?`+clause,
+		append([]any{id, userID}, args...)...)
 	if err != nil {
 		return false, err
 	}
@@ -79,10 +126,12 @@ func (db *DB) DeleteSemanticBySource(ctx context.Context, userID int64, source s
 }
 
 // ListTopics returns the distinct non-empty topics in a user's semantic memory.
-func (db *DB) ListTopics(ctx context.Context, userID int64) ([]string, error) {
+func (db *DB) ListTopics(ctx context.Context, userID, agentScope int64) ([]string, error) {
+	clause, args := scopeFilter("agent_id", agentScope)
 	rows, err := db.QueryContext(ctx,
 		`SELECT DISTINCT topic FROM memory_semantic
-		  WHERE user_id = ? AND topic <> '' ORDER BY topic`, userID)
+		  WHERE user_id = ? AND topic <> ''`+clause+` ORDER BY topic`,
+		append([]any{userID}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -100,10 +149,12 @@ func (db *DB) ListTopics(ctx context.Context, userID int64) ([]string, error) {
 
 // ListSemantic returns a user's semantic memories for the portal editor, newest
 // first.
-func (db *DB) ListSemantic(ctx context.Context, userID int64, limit int) ([]SemanticMemory, error) {
+func (db *DB) ListSemantic(ctx context.Context, userID, agentScope int64, limit int) ([]SemanticMemory, error) {
+	clause, args := scopeFilter("agent_id", agentScope)
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, topic, kind, content, source, created_at, COALESCE(expires_at,'')
-		   FROM memory_semantic WHERE user_id = ? ORDER BY id DESC LIMIT ?`, userID, limit)
+		`SELECT id, COALESCE(agent_id,0), topic, kind, content, source, created_at, COALESCE(expires_at,'')
+		   FROM memory_semantic WHERE user_id = ?`+clause+` ORDER BY id DESC LIMIT ?`,
+		append(append([]any{userID}, args...), limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +162,7 @@ func (db *DB) ListSemantic(ctx context.Context, userID int64, limit int) ([]Sema
 	var out []SemanticMemory
 	for rows.Next() {
 		var m SemanticMemory
-		if err := rows.Scan(&m.ID, &m.Topic, &m.Kind, &m.Content, &m.Source, &m.CreatedAt, &m.ExpiresAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.AgentID, &m.Topic, &m.Kind, &m.Content, &m.Source, &m.CreatedAt, &m.ExpiresAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -174,7 +225,7 @@ func (db *DB) EpisodicDateCounts(ctx context.Context, userID int64) ([]DateCount
 // SemanticByTopic returns a page of a topic's semantic memories, newest first.
 func (db *DB) SemanticByTopic(ctx context.Context, userID int64, topic string, limit, offset int) ([]SemanticMemory, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, topic, kind, content, source, created_at, COALESCE(expires_at,'')
+		`SELECT id, COALESCE(agent_id,0), topic, kind, content, source, created_at, COALESCE(expires_at,'')
 		   FROM memory_semantic WHERE user_id = ? AND topic = ?
 		  ORDER BY id DESC LIMIT ? OFFSET ?`, userID, topic, limit, offset)
 	if err != nil {
@@ -184,7 +235,7 @@ func (db *DB) SemanticByTopic(ctx context.Context, userID int64, topic string, l
 	var out []SemanticMemory
 	for rows.Next() {
 		var m SemanticMemory
-		if err := rows.Scan(&m.ID, &m.Topic, &m.Kind, &m.Content, &m.Source, &m.CreatedAt, &m.ExpiresAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.AgentID, &m.Topic, &m.Kind, &m.Content, &m.Source, &m.CreatedAt, &m.ExpiresAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -292,7 +343,7 @@ func (db *DB) ForgetEpisodic(ctx context.Context, userID, id int64) (bool, error
 // SearchMemory runs an FTS5 query across both memory layers, scoped to the user,
 // with optional topic and time-range filters, returning up to k ranked hits
 //.
-func (db *DB) SearchMemory(ctx context.Context, userID int64, query, topic, after, before string, k int) ([]MemoryHit, error) {
+func (db *DB) SearchMemory(ctx context.Context, userID, agentScope int64, query, topic, after, before string, k int) ([]MemoryHit, error) {
 	match := buildMatch(query)
 	if match == "" || k <= 0 {
 		return nil, nil
@@ -302,10 +353,14 @@ func (db *DB) SearchMemory(ctx context.Context, userID int64, query, topic, afte
 	// an INTEGER, so the filter must bind an integer. Binding a string ('1')
 	// would never match the stored integer (1) — SQLite treats them as distinct
 	// storage classes.
-	sql := `SELECT layer, ref_id, topic, kind, content, ts
+	sql := `SELECT layer, ref_id, COALESCE(agent_id,0), topic, kind, content, ts
 	          FROM memory_fts
 	         WHERE memory_fts MATCH ? AND user_id = ?`
 	args := []any{match, userID}
+	if clause, sa := scopeFilter("agent_id", agentScope); clause != "" {
+		sql += clause
+		args = append(args, sa...)
+	}
 	if topic != "" {
 		sql += ` AND topic = ?`
 		args = append(args, topic)
@@ -330,7 +385,7 @@ func (db *DB) SearchMemory(ctx context.Context, userID int64, query, topic, afte
 	for rows.Next() {
 		var h MemoryHit
 		var refID string
-		if err := rows.Scan(&h.Layer, &refID, &h.Topic, &h.Kind, &h.Content, &h.TS); err != nil {
+		if err := rows.Scan(&h.Layer, &refID, &h.AgentID, &h.Topic, &h.Kind, &h.Content, &h.TS); err != nil {
 			return nil, err
 		}
 		h.RefID, _ = strconv.ParseInt(refID, 10, 64)

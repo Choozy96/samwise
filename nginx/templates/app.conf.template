@@ -1,0 +1,54 @@
+# nginx reverse proxy for the Samwise portal (rendered by the official nginx
+# image's envsubst at startup; only ${SITE_ADDRESS} is substituted — see
+# NGINX_ENVSUBST_FILTER in docker-compose.yml — so nginx's own $host/$remote_addr
+# variables are left intact).
+
+# HTTP :80 — serve the ACME http-01 challenge, redirect everything else to HTTPS.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${SITE_ADDRESS};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS :443 — terminate TLS, proxy to the app over the internal network.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${SITE_ADDRESS};
+
+    ssl_certificate     /etc/letsencrypt/live/${SITE_ADDRESS}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${SITE_ADDRESS}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    # Enforce HTTPS: after one visit, browsers refuse to talk HTTP to this host
+    # for a year (so a stolen-cookie-over-HTTP downgrade can't happen). Lower the
+    # max-age (e.g. 300) while first testing if you want an easy rollback.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options    "nosniff"          always;
+    add_header X-Frame-Options           "SAMEORIGIN"       always;
+    server_tokens off;
+
+    client_max_body_size 25m;   # allow agent file attachments
+    proxy_read_timeout   300s;  # long agent runs
+
+    location / {
+        proxy_pass http://orchestrator:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Stream chat responses (newline-delimited JSON) without buffering.
+        proxy_buffering off;
+        proxy_set_header Connection "";
+    }
+}

@@ -282,9 +282,10 @@ func (s *Scheduler) fireDirectMessage(ctx context.Context, j store.Job) {
 
 func (s *Scheduler) fireAgentRun(ctx context.Context, j store.Job) {
 	var p struct {
-		Prompt string `json:"prompt"`
-		Skill  string `json:"skill"` // optional: load this skill's content into the run
-		Agent  string `json:"agent"` // optional: run as this named agent
+		Prompt   string `json:"prompt"`
+		Skill    string `json:"skill"`    // optional: load this skill's content into the run
+		Agent    string `json:"agent"`    // optional: run as this named agent
+		Delivery string `json:"delivery"` // "" default | "web" | "tg:<botID>:<chatID>"
 	}
 	_ = json.Unmarshal([]byte(j.Payload), &p)
 	if p.Prompt == "" {
@@ -318,7 +319,7 @@ func (s *Scheduler) fireAgentRun(ctx context.Context, j store.Job) {
 		// The reply is already persisted to the conversation by Dispatch; this
 		// pushes it to an external channel without re-storing it (web is a no-op).
 		// Route to the bot bound to this job's agent, if any.
-		if err := s.orch.DeliverRunResult(ctx, j.UserID, p.Agent, res.FinalText); err != nil {
+		if err := s.orch.DeliverRunResult(ctx, j.UserID, p.Agent, p.Delivery, res.FinalText); err != nil {
 			s.log.Error("scheduler: agent_run delivery failed", "job_id", j.ID, "err", err)
 		}
 	}
