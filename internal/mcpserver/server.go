@@ -142,6 +142,7 @@ func (h *handlers) register(s *mcp.Server) {
 		Description: "Get the user's current settings (timezone, delivery channel, active runtime, schedule times).",
 	}, h.getSettings)
 
+	h.registerGuide(s)
 	h.registerReminders(s)
 	h.registerJobs(s)
 }

@@ -31,6 +31,7 @@ var coreTools = []string{
 	"mcp__core__memory_list_topics",
 	"mcp__core__set_timezone",
 	"mcp__core__get_settings",
+	"mcp__core__read_guide",
 	"mcp__core__reminder_set",
 	"mcp__core__reminder_list",
 	"mcp__core__reminder_cancel",

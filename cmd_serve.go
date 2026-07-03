@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"samwise/internal/mcpserver"
 	"samwise/internal/orchestrator"
 	"samwise/internal/runtime"
 	"samwise/internal/scheduler"
@@ -28,6 +29,7 @@ func runServe(_ []string) error {
 
 	web.SetVersion(version)
 	web.SetUserGuide(userGuideMarkdown)
+	mcpserver.SetUserGuide(userGuideMarkdown) // so the agent can read its own guide (read_guide tool)
 
 	// Runtime adapters + orchestrator. MVP registers claude-headless; the
 	// channels and codex adapters slot in behind the same interface later.
