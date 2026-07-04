@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # into the image.
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl tini gosu python3 python3-pip \
+    && apt-get install -y --no-install-recommends ca-certificates curl tini gosu python3 python3-pip python3-venv \
     && npm install -g @anthropic-ai/claude-code \
     # Python deps for skill scripts (e.g. the migrated calendar/todoist/notion
     # skills). Installed system-wide (--break-system-packages) since the image is

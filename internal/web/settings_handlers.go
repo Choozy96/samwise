@@ -107,6 +107,9 @@ func (s *Server) settingsData(st *store.Settings) pageData {
 		"AgentToolsOn":  s.cfg.AllowAgentTools,
 		"OptionalTools": runtime.OptionalTools,
 		"EnabledTools":  enabled,
+		"ToolAudience":  store.ParseToolAudience(st.ToolAudience),
+		"ExecOpeningOn": s.cfg.AllowExecToolOpening,
+		"ExecTools":     runtime.ExecToolList,
 	}
 }
 
@@ -166,6 +169,29 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	st.ExtraTools = strings.Join(enabledTools, ",")
+	// Per-tool audience: start from the existing map (so agent-set overrides on the
+	// scoped Read/Glob/Grep tools survive) and update only the optional tools shown
+	// on this form. Exec tools are never configurable, so they never appear here.
+	aud := store.ParseToolAudience(st.ToolAudience)
+	for _, ot := range runtime.OptionalTools {
+		if r.FormValue("audience_"+ot.Name) == store.AudienceEveryone {
+			aud[ot.Name] = store.AudienceEveryone
+		} else {
+			delete(aud, ot.Name)
+		}
+	}
+	// The write/exec tools are only settable when the deployment allows it; ignore
+	// the fields otherwise so they can't be opened via a crafted POST.
+	if s.cfg.AllowExecToolOpening {
+		for _, t := range runtime.ExecToolList {
+			if r.FormValue("audience_"+t) == store.AudienceEveryone {
+				aud[t] = store.AudienceEveryone
+			} else {
+				delete(aud, t)
+			}
+		}
+	}
+	st.ToolAudience = store.MarshalToolAudience(aud)
 
 	if err := s.db.UpdateSettings(r.Context(), st); err != nil {
 		s.serverError(w, r, err)

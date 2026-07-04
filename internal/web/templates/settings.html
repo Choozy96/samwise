@@ -79,10 +79,30 @@
     <div class="panel">
       <h2>Agent tools (advanced)</h2>
       <p class="muted">The assistant always has a default file/shell toolset. Below are extra built-in tools you can switch on individually — all off by default.{{if not .AgentToolsOn}} <strong>Agent tools are disabled on this deployment (<code>ALLOW_AGENT_TOOLS</code> is off), so these have no effect until an admin enables it.</strong>{{end}}</p>
+      <p class="muted" style="font-size:.85rem">In <strong>group chats</strong>, "who can use it" decides whether only paired (registered) members can trigger a tool, or everyone in the group. Write/shell tools (Bash, Write, Edit) are always paired-only and aren't listed here.</p>
       {{range .OptionalTools}}
       <label style="display:block; margin:.55rem 0 .1rem"><input type="checkbox" name="tool" value="{{.Name}}"{{if index $.EnabledTools .Name}} checked{{end}}> <strong>{{.Name}}</strong> — {{.Desc}}</label>
       {{if .Danger}}<p style="margin:0 0 .4rem 1.7rem; font-size:.85rem; color:var(--danger)">⚠️ {{.Danger}}</p>{{end}}
       {{if .Useless}}<p class="muted" style="margin:0 0 .4rem 1.7rem; font-size:.85rem">No real effect in this setup — safe to leave off.</p>{{end}}
+      <label style="margin:0 0 .5rem 1.7rem; font-size:.85rem; color:var(--muted)">Who can use it in groups:
+        <select name="audience_{{.Name}}" style="width:auto; display:inline-block">
+          <option value="paired"{{if ne (index $.ToolAudience .Name) "everyone"}} selected{{end}}>Paired users only</option>
+          <option value="everyone"{{if eq (index $.ToolAudience .Name) "everyone"}} selected{{end}}>Everyone in the group</option>
+        </select>
+      </label>
+      {{end}}
+      {{if .ExecOpeningOn}}
+      <div class="flash error" style="margin-top:1rem">
+        <strong>⚠️ Danger zone — shell &amp; file tools.</strong> Opening these to <em>everyone</em> lets any <strong>unregistered</strong> group member run code / write files <strong>as you</strong>, with your secrets in the environment — they could read your API tokens or delete your files. Only do this if you fully trust everyone in the chat (and if you do, consider just pairing them instead).
+      </div>
+      {{range .ExecTools}}
+      <label style="margin:0 0 .5rem 0; font-size:.85rem; color:var(--muted)"><strong>{{.}}</strong> — who can use it in groups:
+        <select name="audience_{{.}}" style="width:auto; display:inline-block">
+          <option value="paired"{{if ne (index $.ToolAudience .) "everyone"}} selected{{end}}>Paired users only</option>
+          <option value="everyone"{{if eq (index $.ToolAudience .) "everyone"}} selected{{end}}>Everyone in the group (DANGEROUS)</option>
+        </select>
+      </label>
+      {{end}}
       {{end}}
     </div>
   </div>

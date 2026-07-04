@@ -4,6 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
+)
+
+// Audience levels for a per-resource (skill/tool) access setting: 'paired' means
+// only registered/paired users of the profile; 'everyone' also includes
+// unregistered group senders (read-only runs).
+const (
+	AudiencePaired   = "paired"
+	AudienceEveryone = "everyone"
 )
 
 // Skill is a markdown instruction file. UserID == 0 means global.
@@ -17,6 +26,9 @@ type Skill struct {
 	AlwaysOn    bool
 	Enabled     bool
 	HasBundle   bool
+	Audience    string // 'paired' (default) | 'everyone' — who in a group may use it
+	Entrypoint  string // script (relative to the bundle) skill_run executes; "" = not runnable
+	EnvKeys     string // comma-separated allowlist of secret names this skill's script may receive
 	CreatedAt   string
 	UpdatedAt   string
 }
@@ -24,15 +36,22 @@ type Skill struct {
 // IsGlobal reports whether this is a global (admin-managed) skill.
 func (s Skill) IsGlobal() bool { return s.UserID == 0 }
 
-const skillSelect = `SELECT id, COALESCE(user_id,0), name, description, content, always_on, enabled, has_bundle, created_at, updated_at FROM skills`
+// OpenToEveryone reports whether unregistered group senders may use this skill.
+func (s Skill) OpenToEveryone() bool { return s.Audience == AudienceEveryone }
+
+// Runnable reports whether the skill has an executable entrypoint.
+func (s Skill) Runnable() bool { return strings.TrimSpace(s.Entrypoint) != "" }
+
+const skillSelect = `SELECT id, COALESCE(user_id,0), name, description, content, always_on, enabled, has_bundle, audience, entrypoint, env_keys, created_at, updated_at FROM skills`
 
 // CreateSkill inserts a skill and returns its id.
 func (db *DB) CreateSkill(ctx context.Context, s Skill) (int64, error) {
 	res, err := db.ExecContext(ctx,
-		`INSERT INTO skills(user_id, name, description, content, always_on, enabled, has_bundle)
-		 VALUES(?,?,?,?,?,?,?)`,
+		`INSERT INTO skills(user_id, name, description, content, always_on, enabled, has_bundle, audience, entrypoint, env_keys)
+		 VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		nullInt(s.UserID), s.Name, s.Description, s.Content,
-		boolToInt(s.AlwaysOn), boolToInt(s.Enabled), boolToInt(s.HasBundle))
+		boolToInt(s.AlwaysOn), boolToInt(s.Enabled), boolToInt(s.HasBundle), normalizeAudience(s.Audience),
+		strings.TrimSpace(s.Entrypoint), strings.TrimSpace(s.EnvKeys))
 	if err != nil {
 		return 0, err
 	}
@@ -83,10 +102,19 @@ func (db *DB) ListEnabledSkills(ctx context.Context, userID int64) ([]Skill, err
 // UpdateSkill updates an owned skill's editable fields.
 func (db *DB) UpdateSkill(ctx context.Context, s Skill) error {
 	_, err := db.ExecContext(ctx,
-		`UPDATE skills SET name=?, description=?, content=?, always_on=?, enabled=?, updated_at=datetime('now')
+		`UPDATE skills SET name=?, description=?, content=?, always_on=?, enabled=?, audience=?, entrypoint=?, env_keys=?, updated_at=datetime('now')
 		  WHERE id=? AND user_id IS ?`,
-		s.Name, s.Description, s.Content, boolToInt(s.AlwaysOn), boolToInt(s.Enabled), s.ID, nullInt(s.UserID))
+		s.Name, s.Description, s.Content, boolToInt(s.AlwaysOn), boolToInt(s.Enabled), normalizeAudience(s.Audience),
+		strings.TrimSpace(s.Entrypoint), strings.TrimSpace(s.EnvKeys), s.ID, nullInt(s.UserID))
 	return err
+}
+
+// normalizeAudience coerces any value to a valid audience ('paired' default).
+func normalizeAudience(a string) string {
+	if a == AudienceEveryone {
+		return AudienceEveryone
+	}
+	return AudiencePaired
 }
 
 // SetSkillEnabled toggles an owned skill.
@@ -123,7 +151,7 @@ func (db *DB) querySkills(ctx context.Context, query string, args ...any) ([]Ski
 func scanSkill(row *sql.Row) (*Skill, error) {
 	var s Skill
 	var always, enabled, bundle int
-	err := row.Scan(&s.ID, &s.UserID, &s.Name, &s.Description, &s.Content, &always, &enabled, &bundle, &s.CreatedAt, &s.UpdatedAt)
+	err := row.Scan(&s.ID, &s.UserID, &s.Name, &s.Description, &s.Content, &always, &enabled, &bundle, &s.Audience, &s.Entrypoint, &s.EnvKeys, &s.CreatedAt, &s.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -139,7 +167,7 @@ func scanSkill(row *sql.Row) (*Skill, error) {
 func scanSkillRows(rows *sql.Rows) (Skill, error) {
 	var s Skill
 	var always, enabled, bundle int
-	err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Description, &s.Content, &always, &enabled, &bundle, &s.CreatedAt, &s.UpdatedAt)
+	err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Description, &s.Content, &always, &enabled, &bundle, &s.Audience, &s.Entrypoint, &s.EnvKeys, &s.CreatedAt, &s.UpdatedAt)
 	s.AlwaysOn = always != 0
 	s.Enabled = enabled != 0
 	s.HasBundle = bundle != 0

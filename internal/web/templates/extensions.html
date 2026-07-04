@@ -111,7 +111,7 @@
   {{if .Skills}}
   {{range .Skills}}
     <details style="border:1px solid var(--border); border-radius:6px; padding:.5rem .75rem; margin-bottom:.5rem;">
-      <summary><code>{{.Name}}</code> — {{.Description}} {{if .AlwaysOn}}<span class="pill">always on</span>{{end}}{{if .HasBundle}} <span class="pill">bundle</span>{{end}}{{if .IsGlobal}} <span class="pill">global</span>{{end}}{{if not .Enabled}} <span class="pill">disabled</span>{{end}}</summary>
+      <summary><code>{{.Name}}</code> — {{.Description}} {{if .AlwaysOn}}<span class="pill">always on</span>{{end}}{{if .HasBundle}} <span class="pill">bundle</span>{{end}}{{if .Runnable}} <span class="pill">runnable</span>{{end}}{{if .IsGlobal}} <span class="pill">global</span>{{end}}{{if .OpenToEveryone}} <span class="pill">everyone</span>{{end}}{{if not .Enabled}} <span class="pill">disabled</span>{{end}}</summary>
       {{if not .IsGlobal}}
       <form method="post" action="/extensions/skills/save" style="margin-top:.75rem">
         <input type="hidden" name="id" value="{{.ID}}">
@@ -122,6 +122,16 @@
         <label>Content (markdown)</label>
         <textarea name="content" rows="8">{{.Content}}</textarea>
         <label style="display:inline-flex; gap:.4rem; align-items:center; margin-top:.5rem;"><input type="checkbox" name="always_on" value="1"{{if .AlwaysOn}} checked{{end}}> Always on</label>
+        <label style="margin-top:.5rem">Who can use it in group chats</label>
+        <select name="audience" style="width:auto">
+          <option value="paired"{{if not .OpenToEveryone}} selected{{end}}>Paired users only</option>
+          <option value="everyone"{{if .OpenToEveryone}} selected{{end}}>Everyone in the group</option>
+        </select>
+        <div class="row" style="margin-top:.5rem">
+          <div><label>Runnable entrypoint <span class="muted">(optional)</span></label><input name="entrypoint" value="{{.Entrypoint}}" placeholder="main.py"></div>
+          <div><label>Secrets it may use <span class="muted">(comma-separated)</span></label><input name="env_keys" value="{{.EnvKeys}}" placeholder="BUS_API_KEY"></div>
+        </div>
+        <p class="muted" style="font-size:.8rem; margin:.2rem 0 0">Set an entrypoint (a script in this skill's bundle) to make the skill <strong>runnable</strong> via <code>skill_run</code> — it executes in a sandbox with only the secrets you list. A <code>requirements.txt</code> in the bundle gets a Python venv at import. Combine with "Everyone" above to let unregistered group members run it.</p>
         <div style="margin-top:.6rem; display:flex; gap:.5rem;">
           <button type="submit">Save</button>
         </div>
@@ -156,6 +166,11 @@
       <label for="s_content">Content (markdown)</label>
       <textarea id="s_content" name="content" rows="6" placeholder="# Weekly review&#10;Steps the assistant should follow…"></textarea>
       <label style="display:inline-flex; gap:.4rem; align-items:center; margin-top:.5rem;"><input type="checkbox" name="always_on" value="1"> Always on</label>
+      <label style="margin-top:.5rem">Who can use it in group chats</label>
+      <select name="audience" style="width:auto">
+        <option value="paired">Paired users only</option>
+        <option value="everyone">Everyone in the group</option>
+      </select>
       <div style="margin-top:.6rem"><button type="submit">Add skill</button></div>
     </form>
   </details>

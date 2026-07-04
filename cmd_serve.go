@@ -30,11 +30,13 @@ func runServe(_ []string) error {
 	web.SetVersion(version)
 	web.SetUserGuide(userGuideMarkdown)
 	mcpserver.SetUserGuide(userGuideMarkdown) // so the agent can read its own guide (read_guide tool)
+	mcpserver.SetAllowExecToolOpening(d.cfg.AllowExecToolOpening)
 
 	// Runtime adapters + orchestrator. MVP registers claude-headless; the
 	// channels and codex adapters slot in behind the same interface later.
 	headless := runtime.NewClaudeHeadless(d.cfg.ClaudeBin, d.log)
 	orch := orchestrator.New(d.cfg, d.db, d.log, d.box, headless)
+	mcpserver.SetSkillExecutor(orch.RunSkill) // sandboxed skill_run
 	// Bring up the in-process, token-scoped core MCP host before serving. Fail
 	// loudly if its loopback listener can't bind — a run with no core host gets
 	// no memory/job tools, and we never want to silently fall back to spawning

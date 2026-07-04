@@ -7,7 +7,15 @@
 // interface in later steps.
 package runtime
 
-import "context"
+import (
+	"context"
+	"os/exec"
+)
+
+// ApplyIsolation makes cmd start under the given uid/gid + supplementary groups
+// (Linux only; elsewhere it returns an error). Exported so the orchestrator's
+// sandboxed skill_run path can reuse the same uid-drop as agent runs.
+func ApplyIsolation(cmd *exec.Cmd, iso *RunIsolation) error { return applyIsolation(cmd, iso) }
 
 // ScopedBuiltinTools is the safe default set of Claude Code built-in tools (file
 // + shell) enabled when a run allows host tools, so skills with scripts/assets
@@ -18,6 +26,39 @@ var ScopedBuiltinTools = []string{"Read", "Glob", "Grep", "Bash", "Write", "Edit
 // member in a group): file reads only — no Bash/Write/Edit, which can mutate the
 // owner's workspace or run arbitrary commands.
 var ReadOnlyBuiltinTools = []string{"Read", "Glob", "Grep"}
+
+// ExecToolList are the write/exec built-ins that run with the owner's identity
+// and secrets. They are hard-locked to paired users unless the deployment sets
+// ALLOW_EXEC_TOOL_OPENING (a stranger running these = a shell as the owner).
+var ExecToolList = []string{"Bash", "Write", "Edit"}
+
+var execTools = func() map[string]bool {
+	m := map[string]bool{}
+	for _, t := range ExecToolList {
+		m[t] = true
+	}
+	return m
+}()
+
+// IsExecTool reports whether a tool is a hard-locked write/exec tool.
+func IsExecTool(name string) bool { return execTools[name] }
+
+// AudienceConfigurable reports whether a tool's audience may be changed at all
+// (everything except the hard-locked exec/write tools).
+func AudienceConfigurable(name string) bool { return !execTools[name] }
+
+// DefaultToolAudience is a tool's audience when the user hasn't set one. Reads
+// (Read/Glob/Grep) default to 'everyone' (current behavior: unregistered group
+// members can already read workspace files); everything else defaults to
+// 'paired'. Audience strings match store.Audience* ('everyone' | 'paired').
+func DefaultToolAudience(name string) string {
+	switch name {
+	case "Read", "Glob", "Grep":
+		return "everyone"
+	default:
+		return "paired"
+	}
+}
 
 // OptionalTool is a Claude Code built-in a user can opt into (per tool) beyond
 // the scoped default set. Danger, when set, is an extra-caution warning; Useless
@@ -43,6 +84,17 @@ var OptionalTools = []OptionalTool{
 		Danger: "Extra dangerous: can fan out into many agent runs (cost/latency), and sub-agents inherit the same tools and filesystem reach."},
 	{Name: "ExitPlanMode", Desc: "Leave plan mode.", Useless: true},
 	{Name: "SlashCommand", Desc: "Run one of Claude Code's own slash commands.", Useless: true},
+}
+
+// IsKnownBuiltinTool reports whether name is any recognized built-in (a scoped
+// default or a catalog opt-in) — used to validate audience changes.
+func IsKnownBuiltinTool(name string) bool {
+	for _, t := range ScopedBuiltinTools {
+		if t == name {
+			return true
+		}
+	}
+	return IsOptionalTool(name)
 }
 
 // IsOptionalTool reports whether name is a known opt-in tool (used to validate

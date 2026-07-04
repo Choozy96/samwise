@@ -35,8 +35,10 @@ const platformCapabilities = `# About you and what you can do
 You run as an agent inside Samwise, a self-hosted personal-assistant platform. The user reaches you through a web portal and/or Telegram (including group chats), and you persist across conversations. Your capabilities — most of which ordinary chat assistants lack:
 - Long-term memory: durable facts/preferences/events (memory_save / memory_search) plus automatic dated daily notes. Save what's worth keeping; recall it when relevant.
 - Scheduling: recurring jobs that run you on a schedule (job_create / job_list / job_update) and one-off reminders (reminder_set), interpreted in the user's timezone.
-- Skills: reusable playbooks the user installs; follow them when relevant or asked by name.
+- Skills: reusable playbooks the user installs; follow them when relevant or asked by name. A skill with an entrypoint is "runnable" — execute it with skill_run (name + input) to get its output; this runs only that skill's script in a sandbox, never a shell.
 - Settings & secrets: per-user timezone, delivery channel, model/runtime (get_settings); API tokens for your scripts live in the Secrets settings.
+- Self-customization: you can create/edit your own skills (skill_create / skill_update), create and switch personas and even edit your own instructions (agent_create / agent_switch / agent_update), and change preferences (update_settings, set_timezone). Do this when the user asks you to remember how to behave, take on a role, or change a setting — don't just promise, use the tool.
+- Group access control: in group chats, each skill and each safe tool can be opened to everyone or kept to paired (registered) users — set_skill_audience / set_tool_audience. The write/shell tools (Bash, Write, Edit) are paired-only and can only be opened to everyone if the deployment explicitly allows it (most don't) — and even then it's dangerous, so confirm the user really means it.
 For how any feature actually works — schedule syntax, memory scopes, skills, Telegram groups, settings — call read_guide: it returns your own user guide. Call it with no argument first to list the sections, then again with a section name. The guide is written for the user and references the web UI, so use it to explain or carry out features on their behalf. Don't claim capabilities the guide doesn't list.`
 
 // securityNote is the mandatory untrusted-tool-output rule,
@@ -56,7 +58,7 @@ type assembled struct {
 // the rolling summary, and the recent transcript. Structured
 // retrieval means only relevant rows enter the context window — never whole
 // files.
-func (o *Orchestrator) assemble(ctx context.Context, user *store.User, settings *store.Settings, agent *store.Agent, conv *store.Conversation, incoming string) (assembled, error) {
+func (o *Orchestrator) assemble(ctx context.Context, user *store.User, settings *store.Settings, agent *store.Agent, conv *store.Conversation, incoming string, readOnly bool) (assembled, error) {
 	msgs, err := o.db.RecentMessages(ctx, conv.ID, settings.TranscriptWindowN)
 	if err != nil {
 		return assembled{}, err
@@ -140,6 +142,11 @@ func (o *Orchestrator) assemble(ctx context.Context, user *store.User, settings 
 		var index []store.Skill
 		wroteHeader := false
 		for _, sk := range skills {
+			// On a read-only run (unregistered group sender), only skills the owner
+			// opened to everyone are offered.
+			if readOnly && !sk.OpenToEveryone() {
+				continue
+			}
 			if sk.AlwaysOn && strings.TrimSpace(sk.Content) != "" {
 				if !wroteHeader {
 					sb.WriteString("\n# Skills (playbooks to follow)\n")
