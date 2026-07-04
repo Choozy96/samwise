@@ -155,6 +155,8 @@ func (s *Server) handleExtensions(w http.ResponseWriter, r *http.Request) {
 		data["Flash"], data["FlashKind"] = "Couldn't read that upload. Provide a .zip with a SKILL.md.", "error"
 	case "import_zip":
 		data["Flash"], data["FlashKind"] = "The zip couldn't be extracted (unsafe paths or too large).", "error"
+	case "import_deps":
+		data["Flash"], data["FlashKind"] = "Skill imported, but its requirements.txt failed to install — see the Audit log. Fix the requirements and re-import to make it runnable.", "error"
 	case "secret_saved":
 		data["Flash"], data["FlashKind"] = "Secret saved — it's injected into runs as an env var.", "ok"
 	case "secret_nokey":
@@ -262,6 +264,9 @@ func (s *Server) handleSkillSave(w http.ResponseWriter, r *http.Request) {
 		Description: strings.TrimSpace(r.FormValue("description")),
 		Content:     r.FormValue("content"),
 		AlwaysOn:    r.FormValue("always_on") == "1",
+		Audience:    r.FormValue("audience"), // store normalizes; default 'paired'
+		Entrypoint:  strings.TrimSpace(r.FormValue("entrypoint")),
+		EnvKeys:     strings.TrimSpace(r.FormValue("env_keys")),
 		Enabled:     true,
 	}
 	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
@@ -353,6 +358,16 @@ func (s *Server) handleSkillImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "skill", slug, fmt.Sprintf("imported zip (%d files)", files), "ok")
+
+	// Build the Python venv from requirements.txt (if any) now, while we're in the
+	// trusted, networked import path — so skill_run can later execute offline. A
+	// failure is surfaced to the importing user; the skill is still imported.
+	if err := s.orch.BuildSkillVenv(r.Context(), u.ID, slug); err != nil {
+		s.log.Warn("skill venv build failed", "user_id", u.ID, "skill", slug, "err", err)
+		_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "skill", slug, "venv build: "+err.Error(), "failed")
+		http.Redirect(w, r, "/extensions?msg=import_deps", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/extensions?msg=skill_imported", http.StatusSeeOther)
 }
 

@@ -145,6 +145,11 @@ func (h *handlers) register(s *mcp.Server) {
 	h.registerGuide(s)
 	h.registerReminders(s)
 	h.registerJobs(s)
+	h.registerSkills(s)
+	h.registerSkillRun(s)
+	h.registerAgents(s)
+	h.registerSelfConfig(s)
+	h.registerAudience(s)
 }
 
 // ── handlers ─────────────────────────────────────────────────────────────────

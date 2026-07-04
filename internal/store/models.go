@@ -31,4 +31,5 @@ type Settings struct {
 	DistillNotify     bool   // send a message after end-of-day distillation (opt-in; default false)
 	GroupReplyMode    string // mention | all — when the bot replies in a group (default mention)
 	ExtraTools        string // comma-separated opt-in built-in tool names beyond the scoped set
+	ToolAudience      string // JSON map of built-in tool name -> 'everyone' (overrides; unset = code default)
 }

@@ -25,6 +25,12 @@ changes required.
 An **agent** is a named persona with its own identity and behavior. You can have
 several — e.g. a work assistant, a writing coach, a research agent.
 
+You can also **just ask the assistant** to do this for you in chat — "create a
+coaching persona", "switch to my work agent", or "from now on always be concise"
+(it edits its own soul). It can also create and edit **skills** the same way.
+These self-changes are only available to registered (paired) users, like cron
+jobs.
+
 - Manage them under **Agents**. Each has a **soul** (its system prompt — who it is
   and how it behaves), and optionally its own **model** and **runtime**.
 - Leave the soul blank to use the standard assistant. If you write one, your
@@ -103,6 +109,18 @@ and running write-capable tools. For everyone else the run is **read-only** — 
 can ask and read, but can't mutate your account. The same gate covers slash
 commands (below). Tip: if you own the group, DM-pair your own account too, so you
 can run commands and writes there.
+
+**Opening specific skills or tools to everyone.** By default, only paired members
+can make the assistant *do* things (run tools, use skills). But you can open an
+individual **skill** or a safe **tool** to *everyone* in the group — e.g. let
+anyone run a web search or use a public "look up the menu" skill, while keeping
+everything else paired-only. Set a skill's audience on the **Extensions → Skills**
+editor, a tool's audience on **Settings → Agent tools**, or just ask the assistant
+("let everyone here use web search"). The write/shell tools (Bash, Write, Edit)
+are **paired-only** by default — a stranger must never run code or write files as
+you. They can only be opened to everyone if the deployment sets
+`ALLOW_EXEC_TOOL_OPENING` (off by default), and even then it's a deliberate,
+dangerous choice for fully-trusted groups only.
 
 **Commands in groups need an explicit mention.** In a group, a slash command runs
 only when it's a *clean* command that **names this bot**. Any of these three forms
@@ -219,6 +237,14 @@ reverse).
   followed when relevant or when a job names it.
 - **Skills with scripts** can actually run their scripts when the assistant has
   its scoped tools enabled (on by default in the Docker deployment).
+- **Runnable skills (sandboxed):** give a skill an **entrypoint** (a script in its
+  bundle) and it becomes runnable via a constrained `skill_run` — the assistant
+  runs *only* that script, in a sandbox, with **only** the secrets you list (the
+  "Secrets it may use" field), input passed as plain data, a timeout, and no shell.
+  If the bundle has a `requirements.txt`, a Python venv is built at import. This is
+  the **safe** way to let *everyone* in a group run a script: mark the skill
+  runnable **and** set its audience to "Everyone" — unregistered members can then
+  invoke it without ever getting a shell or your other secrets.
 - For an imported skill, expand it to see its **bundle files** (scripts & assets)
   and click any file to view its contents read-only — so you can inspect exactly
   what a complex skill contains, not just its `SKILL.md`.

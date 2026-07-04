@@ -39,6 +39,19 @@ var coreTools = []string{
 	"mcp__core__job_list",
 	"mcp__core__job_update",
 	"mcp__core__job_delete",
+	"mcp__core__skill_create",
+	"mcp__core__skill_list",
+	"mcp__core__skill_update",
+	"mcp__core__skill_delete",
+	"mcp__core__skill_run",
+	"mcp__core__agent_create",
+	"mcp__core__agent_list",
+	"mcp__core__agent_switch",
+	"mcp__core__agent_update",
+	"mcp__core__agent_delete",
+	"mcp__core__update_settings",
+	"mcp__core__set_skill_audience",
+	"mcp__core__set_tool_audience",
 }
 
 // Orchestrator dispatches runs through the active runtime and persists results.
@@ -204,7 +217,7 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 	// Assemble from the transcript as it stands BEFORE this turn's message — the
 	// new message is sent as the prompt, not duplicated into the transcript.
 	// The incoming message drives memory retrieval.
-	asm, err := o.assemble(ctx, req.User, settings, agent, conv, req.UserMessage)
+	asm, err := o.assemble(ctx, req.User, settings, agent, conv, req.UserMessage, req.ReadOnly)
 	if err != nil {
 		return nil, fmt.Errorf("assembling context: %w", err)
 	}
@@ -407,17 +420,38 @@ func (o *Orchestrator) builtinTools(s *store.Settings, readOnly bool) []string {
 	if !o.cfg.AllowAgentTools {
 		return nil
 	}
-	if readOnly {
-		// No write-capable tools and no opt-in extras for an unregistered sender.
-		return append([]string{}, runtime.ReadOnlyBuiltinTools...)
-	}
-	tools := append([]string{}, runtime.ScopedBuiltinTools...)
+	// Full set a paired (registered) run gets: the scoped defaults plus the user's
+	// validated opt-in extras.
+	full := append([]string{}, runtime.ScopedBuiltinTools...)
 	for _, name := range strings.Split(s.ExtraTools, ",") {
 		if name = strings.TrimSpace(name); name != "" && runtime.IsOptionalTool(name) {
-			tools = append(tools, name)
+			full = append(full, name)
 		}
 	}
-	return tools
+	if !readOnly {
+		return full
+	}
+	// Read-only run (an unregistered group sender): keep only tools the owner has
+	// opened to 'everyone', and NEVER the hard-locked exec/write tools — a stranger
+	// must not run code or write files as the owner. Reads default to 'everyone'.
+	aud := store.ParseToolAudience(s.ToolAudience)
+	var out []string
+	for _, t := range full {
+		// Exec/write tools (Bash/Write/Edit) are hard-locked to paired users UNLESS
+		// the deployment explicitly enabled ALLOW_EXEC_TOOL_OPENING — then they obey
+		// the per-tool audience like any other tool.
+		if runtime.IsExecTool(t) && !o.cfg.AllowExecToolOpening {
+			continue
+		}
+		level := aud[t]
+		if level == "" {
+			level = runtime.DefaultToolAudience(t)
+		}
+		if level == store.AudienceEveryone {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func (o *Orchestrator) selectRuntime(name string) runtime.AgentRuntime {

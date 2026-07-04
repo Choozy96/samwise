@@ -31,8 +31,14 @@ type Config struct {
 	// Defaults on in prod (container), off for native dev; override with
 	// ALLOW_AGENT_TOOLS.
 	AllowAgentTools bool
-	MasterKey       []byte // 32-byte AES key for encrypting DB-stored secrets (may be nil in dev)
-	SessionKey      []byte // HMAC key for signed session cookies (auto-generated in dev if unset)
+	// AllowExecToolOpening lets a paired user open the write/exec built-ins (Bash,
+	// Write, Edit) to 'everyone' in a group — i.e. let UNREGISTERED members run a
+	// shell as the profile owner, with the owner's secrets. DANGEROUS and OFF by
+	// default: with it off, those tools are hard-locked to paired users regardless
+	// of any audience setting. Override with ALLOW_EXEC_TOOL_OPENING.
+	AllowExecToolOpening bool
+	MasterKey            []byte // 32-byte AES key for encrypting DB-stored secrets (may be nil in dev)
+	SessionKey           []byte // HMAC key for signed session cookies (auto-generated in dev if unset)
 
 	// AgentIsolation runs each agent's host tools (bash/read/…) as a distinct,
 	// unprivileged per-user OS uid so one user's run cannot read another user's
@@ -91,6 +97,7 @@ func Load(envPath string) (*Config, error) {
 	}
 
 	c.AllowAgentTools = getenvBool("ALLOW_AGENT_TOOLS", c.IsProd())
+	c.AllowExecToolOpening = getenvBool("ALLOW_EXEC_TOOL_OPENING", false) // dangerous; off by default
 	c.AgentIsolation = getenvBool("AGENT_ISOLATION", c.IsProd())
 	c.AgentUIDBase = getenvInt("AGENT_UID_BASE", 20000)
 	c.AgentCredGID = getenvInt("AGENT_CRED_GID", 10002)
