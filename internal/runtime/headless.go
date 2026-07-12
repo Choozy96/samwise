@@ -180,13 +180,21 @@ func (c *ClaudeHeadless) Run(ctx context.Context, req Request, onEvent func(Even
 	scanErr := sc.Err()
 
 	waitErr := cmd.Wait()
-	if waitErr != nil {
-		msg := strings.TrimSpace(stderr.String())
+	// A non-zero exit OR a result event with is_error means the run failed. Surface
+	// claude's OWN error message (from the stream-json result event, captured in
+	// res.ErrMsg) in preference to the bare "exit status 1" — the latter hid the
+	// real reason (rate limit, auth, model error) from the logs every time.
+	if res.IsError || waitErr != nil {
+		msg := strings.TrimSpace(res.ErrMsg)
 		if msg == "" {
+			msg = strings.TrimSpace(stderr.String())
+		}
+		if msg == "" && waitErr != nil {
 			msg = waitErr.Error()
 		}
-		// A result event with is_error already populated res; prefer surfacing
-		// the process error so the caller records a failed run.
+		if msg == "" {
+			msg = "unknown error (no stderr or result message)"
+		}
 		return res, fmt.Errorf("headless: claude failed: %s", msg)
 	}
 	if scanErr != nil {
