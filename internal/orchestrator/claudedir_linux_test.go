@@ -6,14 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"samwise/internal/config"
 	"samwise/internal/runtime"
 )
 
-// TestSetupRunClaudeDir verifies a run gets a private claude config dir with the
-// shared credential symlinked in, and that a token refresh which replaced the
-// symlink with a real file is synced back to the shared credential and relinked.
+// TestSetupRunClaudeDir verifies a run gets a private claude config dir with its
+// own COPY of the shared credential (not a symlink), and that a token refresh in
+// that copy is synced back to the canonical on the next run.
 // (Uses the test process's own uid/gid so the chowns succeed without root.)
 func TestSetupRunClaudeDir(t *testing.T) {
 	tmp := t.TempDir()
@@ -32,44 +33,48 @@ func TestSetupRunClaudeDir(t *testing.T) {
 	}
 	iso := &runtime.RunIsolation{UID: os.Getuid(), GID: os.Getgid()}
 
-	// First run: the per-user dir holds a symlink to the shared credential.
+	// First run: the per-user dir gets a PRIVATE COPY (not a symlink to the shared file).
 	if err := o.setupRunClaudeDir(7, iso); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(o.workspace(7), ".claude", ".credentials.json")
-	fi, err := os.Lstat(link)
+	copyPath := filepath.Join(o.workspace(7), ".claude", ".credentials.json")
+	fi, err := os.Lstat(copyPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Fatal("credential should be a symlink to the shared file")
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("credential should be a private copy, not a symlink to the shared file")
 	}
-	if got, _ := os.ReadFile(link); string(got) != `{"token":"v1"}` {
-		t.Errorf("symlink resolves to wrong content: %s", got)
+	if got, _ := os.ReadFile(copyPath); string(got) != `{"token":"v1"}` {
+		t.Errorf("copy has wrong content: %s", got)
 	}
 
-	// Simulate a refresh that replaced the symlink with a real file.
-	_ = os.Remove(link)
-	if err := os.WriteFile(link, []byte(`{"token":"v2-refreshed"}`), 0o600); err != nil {
+	// Simulate claude refreshing the token IN THIS RUN'S COPY (newer than canonical).
+	if err := os.WriteFile(copyPath, []byte(`{"token":"v2-refreshed"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	older := time.Now().Add(-time.Hour)
+	_ = os.Chtimes(credPath, older, older) // make the canonical older than the refresh
 
-	// Next run reconciles: new token written back to the shared file, symlink restored.
+	// Next run reconciles the newer copy back to the canonical.
 	if err := o.setupRunClaudeDir(7, iso); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(credPath); string(got) != `{"token":"v2-refreshed"}` {
-		t.Errorf("refreshed token not synced to the shared credential: %s", got)
+		t.Errorf("refreshed token not synced to the canonical: %s", got)
 	}
-	if fi2, _ := os.Lstat(link); fi2.Mode()&os.ModeSymlink == 0 {
-		t.Error("symlink should be restored after reconcile")
+	if got, _ := os.ReadFile(copyPath); string(got) != `{"token":"v2-refreshed"}` {
+		t.Errorf("copy should hold the reconciled token: %s", got)
+	}
+	if fi2, _ := os.Lstat(copyPath); fi2.Mode()&os.ModeSymlink != 0 {
+		t.Error("credential should remain a real copy, never a symlink")
 	}
 }
 
-// TestSetupRunClaudeDirSkipsBadWriteback guards the corruption fix: if the file
-// that replaced the symlink isn't a complete, valid-JSON token (e.g. a partial
-// write from a concurrent run), reconcile must NOT overwrite the shared
-// credential — that file is auth for every user.
+// TestSetupRunClaudeDirSkipsBadWriteback guards the corruption fix: if this run's
+// copy isn't a complete, valid-JSON token (e.g. a torn write), reconcile must NOT
+// overwrite the canonical — and the copy is then refreshed from the good
+// canonical instead.
 func TestSetupRunClaudeDirSkipsBadWriteback(t *testing.T) {
 	tmp := t.TempDir()
 	canonical := filepath.Join(tmp, "shared")
@@ -89,22 +94,24 @@ func TestSetupRunClaudeDirSkipsBadWriteback(t *testing.T) {
 	if err := o.setupRunClaudeDir(7, iso); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(o.workspace(7), ".claude", ".credentials.json")
+	copyPath := filepath.Join(o.workspace(7), ".claude", ".credentials.json")
 
-	// Replace the symlink with a truncated / invalid file (a torn concurrent write).
-	_ = os.Remove(link)
-	if err := os.WriteFile(link, []byte(`{"token":`), 0o600); err != nil {
+	// Replace the copy with a truncated/invalid token, made newer than the canonical.
+	if err := os.WriteFile(copyPath, []byte(`{"token":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	older := time.Now().Add(-time.Hour)
+	_ = os.Chtimes(credPath, older, older)
 
 	if err := o.setupRunClaudeDir(7, iso); err != nil {
 		t.Fatal(err)
 	}
-	// The shared credential must be untouched, and the symlink restored.
+	// Canonical untouched (invalid token never written back)...
 	if got, _ := os.ReadFile(credPath); string(got) != `{"token":"good"}` {
-		t.Errorf("shared credential was corrupted by an invalid writeback: %s", got)
+		t.Errorf("canonical was corrupted by an invalid writeback: %s", got)
 	}
-	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
-		t.Error("symlink should be restored even when writeback is skipped")
+	// ...and the copy is refreshed from the good canonical.
+	if got, _ := os.ReadFile(copyPath); string(got) != `{"token":"good"}` {
+		t.Errorf("copy should be refreshed from the good canonical: %s", got)
 	}
 }
