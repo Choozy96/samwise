@@ -69,16 +69,20 @@ volume — **your data persists across restarts and rebuilds** (only
 `docker compose down -v` deletes it).
 
 1. Create `.env` with `MASTER_KEY` and `SESSION_KEY` (see above).
-2. Give the in-container `claude` your subscription auth — copy your host
-   credentials into the gitignored mount dir:
+2. Give the in-container `claude` its subscription auth (mount dir is gitignored):
 
    ```sh
    mkdir -p secrets/claude
-   cp ~/.claude/.credentials.json secrets/claude/      # path varies by OS
    ```
 
-   (compose mounts `./secrets/claude` → `/home/app/.claude`, read-write so the
-   OAuth token can refresh.)
+   For **local dev** on your own machine, copying your host credentials is fine:
+   `cp ~/.claude/.credentials.json secrets/claude/` (path varies by OS). For a
+   **server/VPS, do NOT copy a credential from a machine you actively use with
+   Claude** — log the server in independently instead (see "claude auth on a
+   headless box" in Troubleshooting). Sharing one credential across two active
+   machines makes them rotate each other's OAuth token → recurring `401` on the
+   server. (Compose mounts `./secrets/claude` → `/home/app/.claude` read-write so
+   the token can refresh.)
 3. Build and start:
 
    ```sh
@@ -184,12 +188,14 @@ A fresh GCP instance has none of this yet. SSH in
    #     optionally TELEGRAM_BOT_TOKEN
    ```
 
-5. **Place the claude credentials** so the in-container `claude` is authenticated
-   (the box is headless — you can't `claude login` there):
+5. **Authenticate the in-container `claude` with its OWN login** (don't share a
+   credential with a machine you actively use — see "claude auth on a headless
+   box" in Troubleshooting; the short version is `docker exec -it … claude` →
+   `/login` → paste the code). You can do this after first boot:
 
    ```sh
    mkdir -p secrets/claude
-   # from your laptop:
+   # Quick-but-fragile alternative (only if that machine won't use Claude after):
    #   scp ~/.claude/.credentials.json user@VPS_IP:~/samwise/secrets/claude/
    ```
 
@@ -269,8 +275,10 @@ Three things are **not** in the image and must exist on the **VPS filesystem**
 (they're bind-mounted and read at runtime):
 
 1. **`.env`** — create it on the VPS (`cp .env.example .env`, fill the keys).
-2. **`./secrets/claude/.credentials.json`** — copy it up from a machine where
-   you're logged into `claude` (the VPS is headless; you can't `claude login` there).
+2. **`./secrets/claude/.credentials.json`** — give the in-container `claude` its
+   own login (`docker exec -it … claude` → `/login`, paste the code; see
+   Troubleshooting). Don't share a credential with a machine you actively use with
+   Claude — they'd rotate each other's token and 401 the server.
 3. **`./nginx/`** (the `templates/` config + `init-letsencrypt.sh`) — only if
    you enable the TLS proxy.
 
@@ -352,12 +360,37 @@ The portal is **plain HTTP** with logins + personal data. Compose binds it to
 - **Firewall to your IP:** restrict 8080 to your home IP (least good — still plain
   HTTP).
 
-### claude auth on a headless box
+### claude auth on a headless box — give the VPS its OWN login
 
-The OAuth token in `./secrets/claude/.credentials.json` refreshes automatically
-(the mount is read-write). But if it fully expires, you can't run an interactive
-`claude` login on a headless VPS — copy a fresh `.credentials.json` up from a
-machine where you're logged in.
+> **Do NOT just copy a `.credentials.json` from a machine you actively use with
+> Claude.** claude.ai's OAuth **rotates the refresh token on every refresh**, so
+> two machines sharing one credential keep invalidating each other — the busy
+> machine (e.g. your laptop running Claude Code) refreshes, the rotated-out token
+> on the VPS goes dead, and every run on the VPS fails with
+> `API Error: 401 Invalid authentication credentials`. A copied credential works
+> only until the source machine next refreshes.
+
+**Give the VPS its own independent login instead.** Claude Code can authenticate
+on a headless box — the CLI does a paste-the-code flow: it prints a URL, you open
+it in a browser on **any** machine, approve, and paste the code back. Run it so it
+writes into the mounted credential dir:
+
+```bash
+docker exec -it samwise-orchestrator-1 \
+  env HOME=/home/app CLAUDE_CONFIG_DIR=/home/app/.claude claude
+#   then run  /login  and follow the URL + paste-the-code prompt
+docker compose restart orchestrator
+```
+
+This gives the server its **own** OAuth session (separate refresh-token chain), so
+nothing rotates its token out from under it. Best practice: treat this as a
+**server-dedicated login you don't use interactively elsewhere**, so the VPS's own
+runs are the only thing refreshing it.
+
+If a second login revokes your laptop's session (some accounts allow several
+device sessions, some don't — check), use a **separate account dedicated to the
+server**. Copying a credential up from a logged-in machine still works as a quick
+fix, but only if that machine won't be used with Claude afterward.
 
 ### Credentials dir ownership (`EACCES … /home/app/.claude`) — self-healed
 

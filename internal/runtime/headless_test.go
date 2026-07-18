@@ -65,3 +65,32 @@ func TestHeadlessParsesUsageTokens(t *testing.T) {
 		t.Errorf("cost/dur: got %v/%d", res.CostUSD, res.DurationMS)
 	}
 }
+
+// TestHeadlessCapturesErrorResult confirms claude's own error text (from an
+// is_error result event) is captured into res.ErrMsg — that's what Run now
+// surfaces instead of a bare "exit status 1".
+func TestHeadlessCapturesErrorResult(t *testing.T) {
+	line := `{"type":"result","subtype":"error","is_error":true,` +
+		`"result":"Claude AI usage limit reached. Resets at 3pm."}`
+	var ev streamLine
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		t.Fatal(err)
+	}
+	c := &ClaudeHeadless{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	res := &Result{}
+	var sawErr string
+	c.handleEvent(ev, res, &strings.Builder{}, func(e Event) {
+		if e.Kind == EventError {
+			sawErr = e.Text
+		}
+	})
+	if !res.IsError {
+		t.Error("res.IsError should be set")
+	}
+	if res.ErrMsg != "Claude AI usage limit reached. Resets at 3pm." {
+		t.Errorf("ErrMsg not captured: %q", res.ErrMsg)
+	}
+	if sawErr == "" {
+		t.Error("an EventError should have been emitted")
+	}
+}

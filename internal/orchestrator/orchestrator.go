@@ -270,6 +270,10 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 		if err := o.setupRunClaudeDir(req.User.ID, iso); err != nil {
 			o.log.Error("preparing per-user claude config dir", "user_id", req.User.ID, "err", err)
 		}
+		// Immediately after the run, push any token refresh claude made back to the
+		// shared canonical — so a concurrent/next run never uses the rotated-dead
+		// old refresh token (the cause of the 401s).
+		defer o.reconcileClaudeCred(req.User.ID)
 		// Each uid gets its own claude config dir + HOME inside its 0700 workspace,
 		// so claude's transcripts/state stay private to that user.
 		if runEnv == nil {
@@ -548,9 +552,9 @@ func (o *Orchestrator) ensureWorkspaceOwner(userID int64, iso *runtime.RunIsolat
 		if err != nil {
 			return err
 		}
-		// Lchown (don't follow symlinks) — defensive; the per-user .claude holds a
-		// private credential COPY (not a link to the shared canonical), so each file
-		// here legitimately belongs to this run's uid.
+		// Lchown, NOT Chown: the per-user .claude holds a symlink to the SHARED
+		// canonical credential — following it would chown the canonical to this run's
+		// uid and break it for everyone else.
 		return os.Lchown(p, iso.UID, iso.GID)
 	}); err != nil {
 		return err
@@ -559,15 +563,15 @@ func (o *Orchestrator) ensureWorkspaceOwner(userID int64, iso *runtime.RunIsolat
 }
 
 // setupRunClaudeDir gives a run its own claude config dir inside the user's 0700
-// workspace AND a PRIVATE COPY of the claude.ai credential — not a symlink to the
-// one shared file. Sharing a single credential across runs meant claude's own
-// token-refresh writes from two concurrent runs (e.g. two cron jobs firing
-// together) could tear that file, breaking auth for everyone until a later run
-// rewrote it. With a per-run copy, each claude only ever writes its own file; the
-// canonical is read/written ONLY by the orchestrator. Refreshes still propagate:
-// on the next run, a NEWER + valid per-user token is copied back to the canonical
-// (serialized + atomic + JSON-validated), and even a stale canonical self-heals
-// because the next run's claude refreshes its own copy.
+// workspace, with the claude.ai credential SYMLINKED to the one shared canonical.
+// Sharing the credential keeps the OAuth refresh COHERENT — claude.ai rotates the
+// refresh token on use, so a refresh by one run must be visible to all runs at
+// once; an isolated per-run copy would strand the rotated token and 401 every
+// other run. Token-refresh writes are kept safe by reconcileClaudeCred (called
+// here AND immediately after each run): if claude refreshed by replacing the
+// symlink with a real file, that newer+valid token is written back to the
+// canonical atomically and the symlink restored, before another run can use the
+// now-dead old token. (transcripts/.claude.json stay per-user, private.)
 func (o *Orchestrator) setupRunClaudeDir(userID int64, iso *runtime.RunIsolation) error {
 	dir := filepath.Join(o.workspace(userID), ".claude")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -580,34 +584,60 @@ func (o *Orchestrator) setupRunClaudeDir(userID int64, iso *runtime.RunIsolation
 	if _, err := os.Stat(cred); err != nil {
 		return nil // no shared credential yet (e.g. claude not authed)
 	}
-	copyPath := filepath.Join(dir, ".credentials.json")
+	link := filepath.Join(dir, ".credentials.json")
+
+	o.reconcileClaudeCred(userID) // propagate a prior run's refresh, then relink below
 
 	o.credMu.Lock()
 	defer o.credMu.Unlock()
+	// Ensure the credential is a symlink to the canonical — replacing a real file
+	// left by a refresh, or a copy left by the old per-run-copy build.
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		_ = os.Remove(link)
+		if err := os.Symlink(cred, link); err != nil {
+			return err
+		}
+	}
+	return os.Lchown(link, iso.UID, iso.GID)
+}
 
-	// Reconcile: if this run's private copy holds a NEWER, valid token than the
-	// canonical (claude refreshed it on the last run), adopt it into the canonical
-	// first — atomically and only if it's a complete, valid token.
-	if cfi, err := os.Stat(copyPath); err == nil {
-		canfi, _ := os.Stat(cred)
-		if canfi == nil || cfi.ModTime().After(canfi.ModTime()) {
-			if data, rerr := os.ReadFile(copyPath); rerr == nil && len(data) > 0 && json.Valid(data) {
-				if werr := writeFileAtomic(cred, data, 0o640); werr != nil {
-					o.log.Error("syncing refreshed credential to shared file", "err", werr)
-				}
+// reconcileClaudeCred propagates a token refresh that claude wrote into a run's
+// per-user .claude dir (by replacing the credential symlink with a real file)
+// back to the shared canonical, so the rotated refresh token reaches every other
+// run before they use the dead old one. Called at run setup AND immediately after
+// each run. Serialized; writes back only a complete, valid token that is NEWER
+// than the canonical (so a stale leftover — e.g. from the old copy build, or a
+// failed refresh — never clobbers a fresher/re-authed canonical). A no-op when
+// the credential is still a symlink (claude wrote through it; canonical current).
+func (o *Orchestrator) reconcileClaudeCred(userID int64) {
+	cred := filepath.Join(o.claudeDir, ".credentials.json")
+	link := filepath.Join(o.workspace(userID), ".claude", ".credentials.json")
+
+	o.credMu.Lock()
+	defer o.credMu.Unlock()
+	fi, err := os.Lstat(link)
+	if err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		return // nothing there, or still a symlink — no per-run refresh to propagate
+	}
+	canfi, cerr := os.Stat(cred)
+	if cerr == nil && fi.ModTime().After(canfi.ModTime()) {
+		if data, rerr := os.ReadFile(link); rerr == nil && len(data) > 0 && json.Valid(data) {
+			if werr := writeFileAtomic(cred, data, 0o640); werr != nil {
+				o.log.Error("syncing refreshed credential to shared file", "user_id", userID, "err", werr)
+			} else {
+				// writeFileAtomic creates a root:root file; keep the shared-credential
+				// group so run uids (members of AgentCredGID) can still read it via
+				// their symlink — otherwise every run 401s on an unreadable credential.
+				_ = os.Chown(cred, -1, o.cfg.AgentCredGID)
 			}
 		}
 	}
-
-	// Refresh this run's private copy from the (now-current) canonical.
-	data, err := os.ReadFile(cred)
-	if err != nil {
-		return err
+	// Restore the symlink so this run (and the next) shares the canonical again.
+	_ = os.Remove(link)
+	if err := os.Symlink(cred, link); err == nil {
+		iso := o.runIsolation(userID)
+		_ = os.Lchown(link, iso.UID, iso.GID)
 	}
-	if err := writeFileAtomic(copyPath, data, 0o600); err != nil {
-		return err
-	}
-	return os.Lchown(copyPath, iso.UID, iso.GID)
 }
 
 // writeFileAtomic writes data to a temp file in the destination's directory then
