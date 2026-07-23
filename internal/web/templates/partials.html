@@ -89,6 +89,7 @@
   <a href="/chat">Chat</a>
   <a href="/agents">Agents</a>
   <a href="/memory">Memory</a>
+  <a href="/files">Files</a>
   <a href="/extensions">Extensions</a>
   <a href="/jobs">Cron jobs</a>
   <a href="/audit">Audit</a>
@@ -137,7 +138,11 @@
       return (d !== null ? d : td.textContent).trim();
     }
     function compare(a, b){
-      var na = parseFloat(a), nb = parseFloat(b);
+      // Number(), not parseFloat(): parseFloat("2026-06-21 12:00") is 2026, which
+      // made every date in a column compare equal (create-time sort looked
+      // broken). Number() is NaN unless the WHOLE string is numeric, so dates
+      // fall through to the locale compare (ISO timestamps sort correctly there).
+      var na = Number(a), nb = Number(b);
       if (a !== '' && b !== '' && !isNaN(na) && !isNaN(nb)) return na - nb;
       return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     }

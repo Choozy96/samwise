@@ -25,6 +25,7 @@ type jobCreateIn struct {
 	Skill    string `json:"skill,omitempty" jsonschema:"optional: name of an installed skill to load into the run"`
 	Agent    string `json:"agent,omitempty" jsonschema:"optional: name of the agent persona to run as (defaults to the active agent)"`
 	Delivery string `json:"delivery,omitempty" jsonschema:"where to deliver the result: 'here' (this chat) or 'web' (the web portal). Omit to use the user's default delivery channel."`
+	Timezone string `json:"timezone,omitempty" jsonschema:"optional IANA zone to PIN the schedule to (e.g. 'Asia/Singapore'), so it stays at that wall time even when the user travels. Omit to follow the user's timezone."`
 }
 
 type jobUpdateIn struct {
@@ -35,6 +36,7 @@ type jobUpdateIn struct {
 	Skill    string `json:"skill,omitempty" jsonschema:"new skill name; pass '-' to clear it"`
 	Agent    string `json:"agent,omitempty" jsonschema:"new agent name; pass '-' to clear it"`
 	Delivery string `json:"delivery,omitempty" jsonschema:"new delivery destination: 'here' (this chat), 'web', or '-' to reset to the user's default"`
+	Timezone string `json:"timezone,omitempty" jsonschema:"pin the schedule to an IANA zone (e.g. 'Asia/Singapore'), or '-' to make it follow the user's timezone again"`
 	Enabled  *bool  `json:"enabled,omitempty" jsonschema:"set false to pause the job, true to resume it"`
 }
 
@@ -97,7 +99,11 @@ func (h *handlers) jobCreate(ctx context.Context, _ *mcp.CallToolRequest, in job
 		return h.fail("job_create", name, "name, schedule, and prompt are all required"), nil, nil
 	}
 
-	loc, next, err := h.resolveSchedule(ctx, specStr)
+	tzMode, tzRef, err := schedule.ResolveTZ(in.Timezone)
+	if err != nil {
+		return h.fail("job_create", in.Timezone, err.Error()), nil, nil
+	}
+	loc, next, err := h.resolveSchedule(ctx, specStr, tzMode, tzRef)
 	if err != nil {
 		return h.fail("job_create", specStr, err.Error()), nil, nil
 	}
@@ -111,7 +117,8 @@ func (h *handlers) jobCreate(ctx context.Context, _ *mcp.CallToolRequest, in job
 		Name:         name,
 		Type:         "agent_run",
 		ScheduleSpec: specStr,
-		TZMode:       "user_local",
+		TZMode:       tzMode,
+		TZRef:        tzRef,
 		Payload:      string(payload),
 		Enabled:      true,
 		CatchUp:      true,
@@ -121,8 +128,12 @@ func (h *handlers) jobCreate(ctx context.Context, _ *mcp.CallToolRequest, in job
 		return h.fail("job_create", name, err.Error()), nil, nil
 	}
 	h.audit("job_create", "spec="+specStr, "ok")
-	return textResult(fmt.Sprintf("Created job #%d %q — next run %s.",
-		id, name, next.In(loc).Format("Mon 2006-01-02 15:04 MST"))), nil, nil
+	zone := ""
+	if tzRef != "" {
+		zone = " (pinned to " + tzRef + ")"
+	}
+	return textResult(fmt.Sprintf("Created job #%d %q%s — next run %s.",
+		id, name, zone, next.In(loc).Format("Mon 2006-01-02 15:04 MST"))), nil, nil
 }
 
 func (h *handlers) jobList(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
@@ -131,7 +142,6 @@ func (h *handlers) jobList(ctx context.Context, _ *mcp.CallToolRequest, _ emptyI
 		return h.fail("job_list", "", err.Error()), nil, nil
 	}
 	settings, _ := h.db.GetSettings(ctx, h.userID)
-	loc := schedule.LocationFor("user_local", "", settings.Timezone)
 
 	var b strings.Builder
 	n := 0
@@ -142,6 +152,8 @@ func (h *handlers) jobList(ctx context.Context, _ *mcp.CallToolRequest, _ emptyI
 		n++
 		var p agentRunPayload
 		_ = json.Unmarshal([]byte(j.Payload), &p)
+		// Display each job's next fire in ITS zone (a pinned job shows its wall time).
+		loc := schedule.LocationFor(j.TZMode, j.TZRef, settings.Timezone)
 		when := j.NextFireUTC
 		if t, perr := time.Parse(time.RFC3339, j.NextFireUTC); perr == nil {
 			when = t.In(loc).Format("Mon 2006-01-02 15:04 MST")
@@ -150,11 +162,15 @@ func (h *handlers) jobList(ctx context.Context, _ *mcp.CallToolRequest, _ emptyI
 		if !j.Enabled {
 			status = " [paused]"
 		}
+		zone := ""
+		if j.TZMode == "fixed_tz" && j.TZRef != "" {
+			zone = " · tz=" + j.TZRef
+		}
 		skill := ""
 		if p.Skill != "" {
 			skill = " · skill=" + p.Skill
 		}
-		fmt.Fprintf(&b, "- #%d %q [%s] next %s%s%s\n", j.ID, j.Name, j.ScheduleSpec, when, skill, status)
+		fmt.Fprintf(&b, "- #%d %q [%s] next %s%s%s%s\n", j.ID, j.Name, j.ScheduleSpec, when, zone, skill, status)
 	}
 	h.audit("job_list", fmt.Sprintf("n=%d", n), "ok")
 	if n == 0 {
@@ -201,9 +217,23 @@ func (h *handlers) jobUpdate(ctx context.Context, _ *mcp.CallToolRequest, in job
 		j.Enabled = *in.Enabled
 	}
 
-	loc := schedule.LocationFor("user_local", "", h.userTimezone(ctx))
-	if s := strings.TrimSpace(in.Schedule); s != "" {
-		l, next, perr := h.resolveSchedule(ctx, s)
+	tzChanged := false
+	if s := strings.TrimSpace(in.Timezone); s != "" {
+		mode, ref, terr := schedule.ResolveTZ(clearable(s)) // "-" → "" → user_local
+		if terr != nil {
+			return h.fail("job_update", s, terr.Error()), nil, nil
+		}
+		j.TZMode, j.TZRef = mode, ref
+		tzChanged = true
+	}
+
+	loc := schedule.LocationFor(j.TZMode, j.TZRef, h.userTimezone(ctx))
+	// A new schedule OR a new timezone both change the fire instant — recompute.
+	if s := strings.TrimSpace(in.Schedule); s != "" || tzChanged {
+		if s == "" {
+			s = j.ScheduleSpec
+		}
+		l, next, perr := h.resolveSchedule(ctx, s, j.TZMode, j.TZRef)
 		if perr != nil {
 			return h.fail("job_update", s, perr.Error()), nil, nil
 		}
@@ -245,9 +275,10 @@ func (h *handlers) jobDelete(ctx context.Context, _ *mcp.CallToolRequest, in job
 }
 
 // resolveSchedule parses a schedule_spec, computes the next fire time in the
-// user's local timezone, and returns the location + that time.
-func (h *handlers) resolveSchedule(ctx context.Context, specStr string) (*time.Location, time.Time, error) {
-	loc := schedule.LocationFor("user_local", "", h.userTimezone(ctx))
+// job's zone (user_local follows the user; fixed_tz pins to tzRef), and returns
+// the location + that time.
+func (h *handlers) resolveSchedule(ctx context.Context, specStr, tzMode, tzRef string) (*time.Location, time.Time, error) {
+	loc := schedule.LocationFor(tzMode, tzRef, h.userTimezone(ctx))
 	spec, err := schedule.Parse(specStr)
 	if err != nil {
 		return loc, time.Time{}, fmt.Errorf("bad schedule %q; use 'daily@HH:MM' or 'weekly@<Day> HH:MM'", specStr)

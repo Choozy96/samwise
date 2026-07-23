@@ -64,6 +64,50 @@ func (s *Server) resolveTGChat(r *http.Request, userID int64, chatID string) (st
 	return "", false
 }
 
+// deliveryTarget is one selectable default-delivery destination beyond the two
+// built-ins (web, telegram-primary): a specific paired Telegram chat.
+type deliveryTarget struct {
+	Value string // "tg:<botID>:<chatID>"
+	Label string
+}
+
+// deliveryTargets lists the user's paired Telegram chats as default-delivery
+// choices for the Settings page. The values double as the allow-list.
+func (s *Server) deliveryTargets(r *http.Request, userID int64) []deliveryTarget {
+	ids, _ := s.db.ListIdentitiesByUser(r.Context(), userID, "telegram")
+	var out []deliveryTarget
+	for _, id := range ids {
+		if id.ChatID == "" {
+			continue
+		}
+		label := "Telegram DM (" + id.ChatID + ")"
+		if strings.HasPrefix(id.ChatID, "-") {
+			label = "Telegram group (" + id.ChatID + ")"
+		}
+		out = append(out, deliveryTarget{
+			Value: "tg:" + strconv.FormatInt(id.BotID, 10) + ":" + id.ChatID,
+			Label: label,
+		})
+	}
+	return out
+}
+
+// sanitizeDefaultDelivery accepts a submitted default delivery channel only if
+// it's web, telegram (primary bot), or a specific chat the user is paired to;
+// anything else keeps the current value.
+func (s *Server) sanitizeDefaultDelivery(r *http.Request, userID int64, v, cur string) string {
+	v = strings.TrimSpace(v)
+	if v == "web" || v == "telegram" {
+		return v
+	}
+	for _, t := range s.deliveryTargets(r, userID) {
+		if t.Value == v {
+			return v
+		}
+	}
+	return cur
+}
+
 // parseDeliveryForm reads the delivery controls from a job form and returns the
 // stored delivery target ("", "web", or "tg:<bot>:<chat>"). A non-empty error
 // string means the submitted Telegram chat id wasn't valid and the form should
@@ -120,12 +164,13 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	settings, _ := s.db.GetSettings(r.Context(), u.ID)
-	loc := schedule.LocationFor("user_local", "", settings.Timezone)
 
 	views := make([]jobView, 0, len(jobs))
 	for _, j := range jobs {
 		v := jobView{Job: j, Summary: payloadSummary(j)}
 		v.DeliverySel, v.DeliveryChat = splitDelivery(payloadField(j, "delivery"))
+		// Show each job's next fire in ITS zone (a pinned job shows its wall time).
+		loc := schedule.LocationFor(j.TZMode, j.TZRef, settings.Timezone)
 		if t, perr := time.Parse(time.RFC3339, j.NextFireUTC); perr == nil {
 			v.NextLocal = t.In(loc).Format("Mon 2006-01-02 15:04 MST")
 		}
@@ -134,6 +179,7 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	data := pageData{
 		"Title": "Cron jobs", "Jobs": views, "TZ": settings.Timezone,
 		"ChatHints": s.chatHints(r, u.ID),
+		"TZOptions": tzOptions(),
 	}
 	switch r.URL.Query().Get("msg") {
 	case "created":
@@ -144,6 +190,8 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		data["Flash"], data["FlashKind"] = "Could not schedule that — check the schedule format.", "error"
 	case "baddelivery":
 		data["Flash"], data["FlashKind"] = "That isn't a Telegram chat you're paired to — pair the bot to it first.", "error"
+	case "badtz":
+		data["Flash"], data["FlashKind"] = "Unknown timezone — use an IANA name like Asia/Singapore or Europe/London, or leave it blank to follow your timezone.", "error"
 	}
 	s.render(w, r, "jobs", data)
 }
@@ -167,7 +215,14 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/jobs?msg=badspec", http.StatusSeeOther)
 		return
 	}
-	loc := schedule.LocationFor("user_local", "", settings.Timezone)
+	// Optional timezone pin: blank follows the user's timezone (user_local); an
+	// IANA name fixes the schedule to that zone.
+	tzMode, tzRef, terr := schedule.ResolveTZ(r.FormValue("timezone"))
+	if terr != nil {
+		http.Redirect(w, r, "/jobs?msg=badtz", http.StatusSeeOther)
+		return
+	}
+	loc := schedule.LocationFor(tzMode, tzRef, settings.Timezone)
 	next, ok := schedule.NextFireUTC(spec, loc, time.Now())
 	if !ok {
 		http.Redirect(w, r, "/jobs?msg=badspec", http.StatusSeeOther)
@@ -195,7 +250,8 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		Name:         name,
 		Type:         jobType,
 		ScheduleSpec: specStr,
-		TZMode:       "user_local",
+		TZMode:       tzMode,
+		TZRef:        tzRef,
 		Payload:      string(payload),
 		Enabled:      true,
 		CatchUp:      true,
@@ -228,6 +284,13 @@ func (s *Server) handleJobUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/jobs?msg=badspec", http.StatusSeeOther)
 		return
 	}
+	// The edit form prefills the current zone, so blank = follow the user again.
+	tzMode, tzRef, terr := schedule.ResolveTZ(r.FormValue("timezone"))
+	if terr != nil {
+		http.Redirect(w, r, "/jobs?msg=badtz", http.StatusSeeOther)
+		return
+	}
+	job.TZMode, job.TZRef = tzMode, tzRef
 	loc := schedule.LocationFor(job.TZMode, job.TZRef, settings.Timezone)
 	next, ok := schedule.NextFireUTC(spec, loc, time.Now())
 	if !ok {

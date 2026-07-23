@@ -13,7 +13,7 @@ import (
 // registered (paired) users.
 
 type updateSettingsIn struct {
-	DeliveryChannel string `json:"delivery_channel,omitempty" jsonschema:"default destination for scheduled results: 'web' or 'telegram'"`
+	DeliveryChannel string `json:"delivery_channel,omitempty" jsonschema:"default destination for scheduled results and notifications: 'web', 'telegram' (primary bot), or 'here' (this specific chat)"`
 	MessageFormat   string `json:"message_format,omitempty" jsonschema:"Telegram message formatting: 'markdown', 'html', or 'plain'"`
 	GroupReply      string `json:"group_reply,omitempty" jsonschema:"in group chats, reply only when addressed ('mention') or to every message ('all')"`
 }
@@ -35,11 +35,16 @@ func (h *handlers) updateSettings(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 	var changes []string
 	if v := strings.ToLower(strings.TrimSpace(in.DeliveryChannel)); v != "" {
-		if v != "web" && v != "telegram" {
-			return h.fail("update_settings", "delivery_channel="+v, "delivery_channel must be 'web' or 'telegram'"), nil, nil
+		switch v {
+		case "web", "telegram":
+			s.DeliveryChannel = v
+		case "here":
+			// The originating chat becomes the default (or web when run from the portal).
+			s.DeliveryChannel = h.resolveDelivery("here")
+		default:
+			return h.fail("update_settings", "delivery_channel="+v, "delivery_channel must be 'web', 'telegram', or 'here'"), nil, nil
 		}
-		s.DeliveryChannel = v
-		changes = append(changes, "delivery channel → "+v)
+		changes = append(changes, "delivery channel → "+s.DeliveryChannel)
 	}
 	if v := strings.ToLower(strings.TrimSpace(in.MessageFormat)); v != "" {
 		if v != "markdown" && v != "html" && v != "plain" {

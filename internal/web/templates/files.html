@@ -1,0 +1,89 @@
+{{define "files"}}{{template "header" .}}
+<h1>Files</h1>
+<p class="muted">Your workspace — uploads, skill bundles, and files your assistant created. Browse folders, upload, rename, edit, and delete. Internal state (the assistant's config dir, venvs, caches) is hidden.</p>
+
+<p style="margin:.4rem 0 .8rem">
+  <a href="/files">🏠 Files</a>{{range .Crumbs}} / <a href="/files?path={{.Rel}}">{{.Name}}</a>{{end}}
+</p>
+
+<div class="panel">
+  {{if .Crumbs}}<p style="margin:0 0 .5rem"><a href="{{if .ParentRel}}/files?path={{.ParentRel}}{{else}}/files{{end}}">⬆️ ..</a></p>{{end}}
+  {{if .Entries}}
+  <div class="table-wrap"><table class="sortable">
+    <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th data-nosort></th></tr></thead>
+    <tbody>
+    {{range .Entries}}
+      <tr>
+        <td class="wrap-cell">
+          {{if .Dir}}📁 <a href="/files?path={{.Rel}}"><strong>{{.Name}}</strong></a>
+          {{else}}📄 <a href="/files/view?path={{.Rel}}"><code>{{.Name}}</code></a>{{end}}
+        </td>
+        <td class="muted">{{.Size}}</td>
+        <td class="muted">{{.Modified}}</td>
+        <td>
+          <div style="display:flex; gap:.4rem; align-items:flex-start">
+            <details>
+              <summary class="btn secondary" style="cursor:pointer">Rename</summary>
+              <form method="post" action="/files/rename" style="margin-top:.4rem; min-width:200px">
+                <input type="hidden" name="path" value="{{.Rel}}">
+                <input name="name" value="{{.Name}}" required>
+                <div style="margin-top:.4rem"><button type="submit">Rename</button></div>
+              </form>
+            </details>
+            <form method="post" action="/files/delete" onsubmit="return confirm('Delete {{.Name}}{{if .Dir}} and everything inside it{{end}}?')">
+              <input type="hidden" name="path" value="{{.Rel}}">
+              <button class="secondary">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table></div>
+  {{else}}
+  <p class="muted">This folder is empty.</p>
+  {{end}}
+</div>
+
+<div class="row">
+  <div class="panel" style="flex:1">
+    <h2>Upload here</h2>
+    <form method="post" action="/files/upload" enctype="multipart/form-data">
+      <input type="hidden" name="dir" value="{{.Rel}}">
+      <input type="file" name="file" multiple required>
+      <div style="margin-top:.6rem"><button type="submit">Upload</button></div>
+      <p class="muted" style="font-size:.8rem; margin:.4rem 0 0">Max 25 MB per file. An existing file with the same name is replaced.</p>
+    </form>
+  </div>
+  <div class="panel" style="flex:1">
+    <h2>New folder</h2>
+    <form method="post" action="/files/mkdir">
+      <input type="hidden" name="dir" value="{{.Rel}}">
+      <input name="name" placeholder="folder-name" required>
+      <div style="margin-top:.6rem"><button type="submit">Create</button></div>
+    </form>
+  </div>
+</div>
+{{template "footer" .}}{{end}}
+
+{{define "wsfile"}}{{template "header" .}}
+<p style="margin-bottom:.5rem"><a href="{{if .DirRel}}/files?path={{.DirRel}}{{else}}/files{{end}}">← Back to Files</a></p>
+<h1 style="font-size:1.1rem"><code>{{.Path}}</code></h1>
+{{if .Note}}<p class="muted">{{.Note}}</p>{{end}}
+{{if .Editable}}
+<form method="post" action="/files/save">
+  <input type="hidden" name="path" value="{{.Path}}">
+  <textarea name="content" rows="24" style="font-family:ui-monospace,Consolas,monospace; font-size:.85rem; white-space:pre;">{{.Content}}</textarea>
+  <div style="margin-top:.6rem; display:flex; gap:.5rem">
+    <button type="submit">Save</button>
+    <a class="btn secondary" href="/files/view?path={{.Path}}">Discard changes</a>
+  </div>
+</form>
+{{else if .Content}}
+<pre style="overflow:auto; max-height:72vh; border:1px solid var(--border); border-radius:6px; padding:.75rem; white-space:pre; font-size:.85rem;">{{.Content}}</pre>
+{{end}}
+<form method="post" action="/files/delete" onsubmit="return confirm('Delete this file?')" style="margin-top:.8rem">
+  <input type="hidden" name="path" value="{{.Path}}">
+  <button class="secondary">Delete file</button>
+</form>
+{{template "footer" .}}{{end}}

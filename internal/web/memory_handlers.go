@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -75,6 +76,8 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		}
 		rows, hasNext := trimPage(rows)
 		data["View"], data["Semantic"], data["HasNext"] = "topic", rows, hasNext
+		data["Back"] = "/memory?topic=" + url.QueryEscape(topic)
+		data["NextHref"] = "/memory?topic=" + url.QueryEscape(topic) + "&page=" + strconv.Itoa(page+1)
 	case date != "":
 		rows, herr := s.db.EpisodicByDate(ctx, u.ID, date, memPageSize+1, off)
 		if herr != nil {
@@ -83,15 +86,78 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		}
 		rows, hasNext := trimPageEpi(rows)
 		data["View"], data["Episodic"], data["HasNext"] = "date", rows, hasNext
+		data["Back"] = "/memory?date=" + url.QueryEscape(date)
+		data["NextHref"] = "/memory?date=" + url.QueryEscape(date) + "&page=" + strconv.Itoa(page+1)
 	default:
-		recent, herr := s.db.ListSemantic(ctx, u.ID, store.AllAgents, 25)
+		recent, herr := s.db.ListSemanticPage(ctx, u.ID, store.AllAgents, memPageSize+1, off)
 		if herr != nil {
 			s.serverError(w, r, herr)
 			return
 		}
-		data["View"], data["Semantic"] = "index", recent
+		recent, hasNext := trimPage(recent)
+		data["View"], data["Semantic"], data["HasNext"] = "index", recent, hasNext
+		data["Back"] = "/memory"
+		data["NextHref"] = "/memory?page=" + strconv.Itoa(page+1)
 	}
 	s.render(w, r, "memory", data)
+}
+
+// handleMemoryRows serves ONE page of memory rows as an HTML fragment for the
+// browser's infinite scroll: table rows for the topic/index views, note panels
+// for the date view. X-Has-Next signals whether another page exists.
+func (s *Server) handleMemoryRows(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r.Context())
+	ctx := r.Context()
+	view := r.URL.Query().Get("view")
+	topic := strings.TrimSpace(r.URL.Query().Get("topic"))
+	date := strings.TrimSpace(r.URL.Query().Get("date"))
+	page := pageParam(r)
+	off := (page - 1) * memPageSize
+
+	agents, err := s.db.ListAgents(ctx, u.ID)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	data := pageData{"Agents": agents}
+	name := ""
+	hasNext := false
+	switch view {
+	case "topic":
+		rows, herr := s.db.SemanticByTopic(ctx, u.ID, topic, memPageSize+1, off)
+		if herr != nil {
+			s.serverError(w, r, herr)
+			return
+		}
+		rows, hasNext = trimPage(rows)
+		data["Semantic"], data["Back"] = rows, "/memory?topic="+url.QueryEscape(topic)
+		name = "memrows_topic"
+	case "date":
+		rows, herr := s.db.EpisodicByDate(ctx, u.ID, date, memPageSize+1, off)
+		if herr != nil {
+			s.serverError(w, r, herr)
+			return
+		}
+		rows, hasNext = trimPageEpi(rows)
+		data["Episodic"], data["Back"] = rows, "/memory?date="+url.QueryEscape(date)
+		name = "memrows_date"
+	default:
+		rows, herr := s.db.ListSemanticPage(ctx, u.ID, store.AllAgents, memPageSize+1, off)
+		if herr != nil {
+			s.serverError(w, r, herr)
+			return
+		}
+		rows, hasNext = trimPage(rows)
+		data["Semantic"], data["Back"] = rows, "/memory"
+		name = "memrows_index"
+	}
+	if hasNext {
+		w.Header().Set("X-Has-Next", "1")
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
+		s.log.Error("memory rows fragment", "view", view, "err", err)
+	}
 }
 
 func pageParam(r *http.Request) int {

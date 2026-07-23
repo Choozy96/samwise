@@ -14,12 +14,12 @@ func (db *DB) GetSettings(ctx context.Context, userID int64) (*Settings, error) 
 		`SELECT user_id, timezone, active_runtime, delivery_channel, model_hints,
 		        briefing_time, restart_time, distillation_time,
 		        transcript_window_n, retrieval_k, tg_format, distill_notify, group_reply_mode,
-		        extra_tools, tool_audience
+		        extra_tools, tool_audience, distill_notify_target, distill_tz
 		   FROM user_settings WHERE user_id = ?`, userID).
 		Scan(&s.UserID, &s.Timezone, &s.ActiveRuntime, &s.DeliveryChannel, &s.ModelHints,
 			&s.BriefingTime, &s.RestartTime, &s.DistillationTime,
 			&s.TranscriptWindowN, &s.RetrievalK, &s.TgFormat, &distillNotify, &s.GroupReplyMode,
-			&s.ExtraTools, &s.ToolAudience)
+			&s.ExtraTools, &s.ToolAudience, &s.DistillNotifyTarget, &s.DistillTZ)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -64,11 +64,13 @@ func (db *DB) UpdateSettings(ctx context.Context, s *Settings) error {
 		    timezone = ?, active_runtime = ?, delivery_channel = ?, model_hints = ?,
 		    briefing_time = ?, restart_time = ?, distillation_time = ?,
 		    transcript_window_n = ?, retrieval_k = ?, tg_format = ?, distill_notify = ?,
-		    group_reply_mode = ?, extra_tools = ?, tool_audience = ?
+		    group_reply_mode = ?, extra_tools = ?, tool_audience = ?,
+		    distill_notify_target = ?, distill_tz = ?
 		  WHERE user_id = ?`,
 		s.Timezone, s.ActiveRuntime, s.DeliveryChannel, s.ModelHints,
 		s.BriefingTime, s.RestartTime, s.DistillationTime,
 		s.TranscriptWindowN, s.RetrievalK, s.TgFormat, boolToInt(s.DistillNotify),
-		s.GroupReplyMode, s.ExtraTools, s.ToolAudience, s.UserID)
+		s.GroupReplyMode, s.ExtraTools, s.ToolAudience,
+		s.DistillNotifyTarget, s.DistillTZ, s.UserID)
 	return err
 }

@@ -79,3 +79,33 @@ func TestExtraToolsDefaultAndUpdate(t *testing.T) {
 		t.Errorf("extra_tools should persist, got %q", s2.ExtraTools)
 	}
 }
+
+// TestDistillTargetTZRoundTrip verifies the distillation notify target and
+// pinned timezone default to blank (default channel / user's tz) and round-trip.
+func TestDistillTargetTZRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	uid, err := db.CreateUser(ctx, "alice", "h", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := db.GetSettings(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.DistillNotifyTarget != "" || s.DistillTZ != "" {
+		t.Errorf("defaults should be blank: target=%q tz=%q", s.DistillNotifyTarget, s.DistillTZ)
+	}
+	s.DistillNotifyTarget = "tg:7:555"
+	s.DistillTZ = "Asia/Singapore"
+	if err := db.UpdateSettings(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetSettings(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DistillNotifyTarget != "tg:7:555" || got.DistillTZ != "Asia/Singapore" {
+		t.Errorf("round-trip failed: target=%q tz=%q", got.DistillNotifyTarget, got.DistillTZ)
+	}
+}

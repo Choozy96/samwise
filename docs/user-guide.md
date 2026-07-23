@@ -203,7 +203,12 @@ own.
      re-reads the whole day and writes the authoritative summary for that date.
    - Distillation is **silent by default**. If you'd like to see what it
      remembered, turn on the **end-of-day note** under **Settings → Memory &
-     context** and it'll message you that summary when the daily pass runs.
+     context** and it'll message you that summary when the daily pass runs — and
+     you can pick **where** it goes (your default destination, the web portal, or
+     a specific Telegram chat).
+   - If you travel a lot, set a **distillation timezone** there too — it pins the
+     "day" boundary (and the end-of-day moment) to a fixed zone instead of
+     following you.
 
 ### How memory gets retrieved
 
@@ -223,7 +228,29 @@ to the conversation — you don't have to remind it of things it already knows.
 The **Memory** page lets you browse by **topic** (facts) or by **date** (daily
 notes), **search** across everything, drill into a topic or date, and add or
 delete entries. Click any table's column header to **sort** by it (click again to
-reverse).
+reverse). Long lists load more entries automatically as you **scroll** (there's
+also a *Load more* link that works without JavaScript).
+
+## Files
+
+The **Files** page is a file manager for your **workspace** — files you attached
+in chat, imported skill bundles, and anything the assistant created with its
+tools.
+
+- **Browse by folder** with breadcrumbs (folders sort first; click a column
+  header to sort).
+- **Upload** files into the current folder (max 25 MB each; a same-named file is
+  replaced) and **create folders**.
+- **Rename** and **delete** files or folders from the listing (deleting a folder
+  removes everything inside — you'll be asked to confirm).
+- **Click a file to view it** — text files open in an **editor** you can change
+  and save right in the browser; binary and oversized files are noted rather
+  than dumped.
+
+Internal state (like the assistant's own config directory, virtualenvs, caches)
+is hidden and can't be touched from here. Every change is recorded in your Audit
+log, and the assistant sees your edits on its next run — handy for tweaking a
+skill's script by hand.
 
 ## Skills
 
@@ -301,6 +328,10 @@ Under **Cron jobs** you can create things that run automatically.
   choose chats you actually belong to.
 - **Timezone drift**: jobs set to *your local time* follow you when you travel; tell
   the assistant "I've landed in London" and your schedule shifts with you.
+- **Pinning a timezone**: alternatively, give a job a fixed **timezone** (the
+  form's Timezone field, or tell the assistant "keep this at 3pm Singapore time")
+  and it stays at that wall time no matter where you travel. Pinned jobs show
+  their zone next to the schedule. Leave the field blank to follow you.
 - **Pausing**: untick **Enabled** when editing a job to pause it — it stays in your
   list but won't fire until you re-enable it. (One-shot jobs auto-pause after they
   run; a job that keeps failing to authenticate is paused too.)
@@ -317,16 +348,22 @@ something looks off. You only see your own activity.
 
 Settings are organized into tabs:
 
-- **General** — timezone, delivery channel, Telegram message format, your active
-  access method / model, and **agent tools (advanced)**: the assistant always has
+- **General** — timezone, the **default delivery destination** (where scheduled
+  results, reminders, and notices land unless something sets its own: the web
+  portal, your primary Telegram bot, or a **specific paired chat** — also
+  settable in chat with "make this chat the default"), Telegram message format,
+  your active access method / model, and **agent tools (advanced)**: the assistant always has
   a default file/shell toolset; here you can switch on **individual** extra
   built-in tools (e.g. `WebFetch`/`WebSearch` to read pages and search the web).
   Each lists what it does, with a warning on the risky ones and a note on the ones
   that do nothing here. All off by default, and only apply when the deployment has
   agent tools enabled.
-- **Memory & context** — the **end-of-day distillation time**, whether to be
-  **notified** of the daily memory note, and context tuning (transcript window,
-  memory retrieval depth). See [Memory](#memory) for what these do.
+- **Memory & context** — the **end-of-day distillation time**, an optional
+  **distillation timezone** (pins the "day" boundary to a fixed zone when you
+  travel), whether to be **notified** of the daily memory note and **where that
+  note goes** (default destination, web, or a specific paired chat), and context
+  tuning (transcript window, memory retrieval depth). See [Memory](#memory) for
+  what these do.
 - **Account** — **change password** (enter your current password and a new one,
   min 8 chars) and **re-run setup** (restarts the welcome wizard).
 

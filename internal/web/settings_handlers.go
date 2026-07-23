@@ -21,7 +21,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	data := s.settingsData(st)
+	data := s.settingsData(r, st)
 	switch {
 	case r.URL.Query().Get("saved") == "1":
 		data["Flash"] = "Settings saved."
@@ -91,7 +91,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 // settingsData assembles the template data, including the access-method/model
 // catalogs and the currently selected model id.
-func (s *Server) settingsData(st *store.Settings) pageData {
+func (s *Server) settingsData(r *http.Request, st *store.Settings) pageData {
 	enabled := map[string]bool{}
 	for _, name := range strings.Split(st.ExtraTools, ",") {
 		if name = strings.TrimSpace(name); name != "" {
@@ -110,6 +110,9 @@ func (s *Server) settingsData(st *store.Settings) pageData {
 		"ToolAudience":  store.ParseToolAudience(st.ToolAudience),
 		"ExecOpeningOn": s.cfg.AllowExecToolOpening,
 		"ExecTools":     runtime.ExecToolList,
+		// Specific paired chats selectable as the default delivery destination.
+		"DeliveryTargets": s.deliveryTargets(r, currentUser(r.Context()).ID),
+		"TZOptions":       tzOptions(),
 	}
 }
 
@@ -153,12 +156,26 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	} else if raw := strings.TrimSpace(r.FormValue("model")); raw != "" {
 		st.ModelHints = orchestrator.SetChatModel(st.ModelHints, raw)
 	}
-	st.DeliveryChannel = pick(r.FormValue("delivery_channel"), []string{"web", "telegram"}, st.DeliveryChannel)
+	st.DeliveryChannel = s.sanitizeDefaultDelivery(r, u.ID, r.FormValue("delivery_channel"), st.DeliveryChannel)
 	st.TgFormat = pick(r.FormValue("tg_format"), []string{"markdown", "html", "plain"}, st.TgFormat)
 	st.DistillationTime = normalizeHHMM(r.FormValue("distillation_time"), st.DistillationTime)
 	st.TranscriptWindowN = n
 	st.RetrievalK = k
 	st.DistillNotify = r.FormValue("distill_notify") == "1"
+	// Distillation notify target: '' = the default delivery destination; else
+	// validated like the default (web / a paired chat).
+	if tgt := strings.TrimSpace(r.FormValue("distill_notify_target")); tgt == "" {
+		st.DistillNotifyTarget = ""
+	} else {
+		st.DistillNotifyTarget = s.sanitizeDefaultDelivery(r, u.ID, tgt, st.DistillNotifyTarget)
+	}
+	// Distillation timezone: blank follows the user's timezone; else a valid IANA zone.
+	if _, ref, terr := schedule.ResolveTZ(r.FormValue("distill_tz")); terr != nil {
+		s.renderSettingsError(w, r, st, "Unknown distillation timezone — use an IANA name like Asia/Singapore, or leave it blank.")
+		return
+	} else {
+		st.DistillTZ = ref
+	}
 	st.GroupReplyMode = pick(r.FormValue("group_reply_mode"), []string{"mention", "all"}, st.GroupReplyMode)
 	// Collect the checked optional tools, validated against the catalog so only
 	// known tool names can ever be enabled.
@@ -207,7 +224,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderSettingsError(w http.ResponseWriter, r *http.Request, st *store.Settings, msg string) {
-	data := s.settingsData(st)
+	data := s.settingsData(r, st)
 	data["Flash"], data["FlashKind"] = msg, "error"
 	s.render(w, r, "settings", data)
 }

@@ -13,8 +13,8 @@ import (
 	"samwise/internal/store"
 )
 
-// TryCommand intercepts slash commands typed in any channel (web + Telegram).
-// It returns the reply text and handled=true when the message was a
+// TryCommand intercepts slash commands typed in any channel (web and
+// Telegram alike). It returns the reply text and handled=true when the message was a
 // recognized command; otherwise handled=false and the caller dispatches the
 // message to the agent as normal. Unrecognized "/..." messages are passed
 // through to the agent (handled=false) so they aren't swallowed.
@@ -161,18 +161,21 @@ func (o *Orchestrator) cmdDelivery(ctx context.Context, userID int64, arg string
 	}
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case "":
-		return "Delivery channel: " + s.DeliveryChannel + ".\nSet with /delivery <web|telegram>."
+		return "Default delivery destination: " + s.DeliveryChannel + ".\n" +
+			"Set with /delivery <web|telegram>. To make a SPECIFIC chat the default, " +
+			"use Settings → General in the portal, or just tell me: “make this chat the default”."
 	case "web":
 		s.DeliveryChannel = "web"
 	case "telegram", "tg":
 		s.DeliveryChannel = "telegram"
 	default:
-		return "Use: /delivery web  or  /delivery telegram."
+		return "Use: /delivery web  or  /delivery telegram. For a specific chat, " +
+			"set it in Settings → General, or tell me “make this chat the default”."
 	}
 	if err := o.db.UpdateSettings(ctx, s); err != nil {
 		return "Couldn't save that."
 	}
-	return "Delivery channel set to " + s.DeliveryChannel + "."
+	return "Default delivery destination set to " + s.DeliveryChannel + "."
 }
 
 // cmdJobs lists the user's recurring scheduled (agent_run) jobs.

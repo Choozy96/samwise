@@ -54,13 +54,22 @@ func (o *Orchestrator) NotifyTelegramBot(ctx context.Context, userID, botID int6
 	return o.telegram.SendBot(ctx, userID, botID, text)
 }
 
-// DeliverToUser delivers text to the user's preferred delivery channel. All
-// formatting/chunking/rate-limiting for a channel lives behind its
-// sender; the agent has no send tool.
+// DeliverToUser delivers text to the user's default delivery channel:
+// "web", "telegram" (primary bot), or a specific paired chat
+// ("tg:<botID>:<chatID>"). All formatting/chunking/rate-limiting for a channel
+// lives behind its sender; the agent has no send tool.
 func (o *Orchestrator) DeliverToUser(ctx context.Context, userID int64, text string) error {
 	s, err := o.db.GetSettings(ctx, userID)
 	if err != nil {
 		return err
+	}
+	if strings.HasPrefix(s.DeliveryChannel, "tg:") && o.telegram != nil {
+		if botID, chatID, ok := parseTGDelivery(s.DeliveryChannel); ok {
+			if err := o.telegram.SendToChat(ctx, userID, botID, chatID, text); err == nil {
+				return nil
+			}
+			o.log.Warn("default-chat delivery failed; delivering to web", "user_id", userID, "target", s.DeliveryChannel)
+		}
 	}
 	if s.DeliveryChannel == "telegram" && o.telegram != nil {
 		err := o.telegram.Send(ctx, userID, text)
@@ -71,7 +80,12 @@ func (o *Orchestrator) DeliverToUser(ctx context.Context, userID int64, text str
 		// so a reminder is never silently dropped.
 		o.log.Warn("telegram delivery failed; delivering to web", "user_id", userID, "err", err)
 	}
-	// Web delivery: append to the active agent's web conversation so it shows in chat.
+	return o.deliverToWeb(ctx, userID, text)
+}
+
+// deliverToWeb appends text to the active agent's web conversation so it shows
+// in the portal chat.
+func (o *Orchestrator) deliverToWeb(ctx context.Context, userID int64, text string) error {
 	agent, err := o.db.GetActiveAgent(ctx, userID)
 	if err != nil {
 		return err
@@ -100,10 +114,15 @@ func (o *Orchestrator) DeliverRunResult(ctx context.Context, userID int64, agent
 	case delivery == "web":
 		return o.postToWebChat(ctx, userID, agentName, text)
 	default:
-		// "" → the user's default delivery channel.
+		// "" → the user's default delivery channel (which may itself be a chat).
 		s, err := o.db.GetSettings(ctx, userID)
 		if err != nil {
 			return err
+		}
+		if strings.HasPrefix(s.DeliveryChannel, "tg:") && o.telegram != nil {
+			if botID, chatID, ok := parseTGDelivery(s.DeliveryChannel); ok {
+				return o.telegram.SendToChat(ctx, userID, botID, chatID, text)
+			}
 		}
 		if s.DeliveryChannel == "telegram" && o.telegram != nil {
 			if agentID := o.agentIDForName(ctx, userID, agentName); agentID != 0 {
@@ -245,7 +264,13 @@ func (o *Orchestrator) SaveDailyDistillation(ctx context.Context, userID int64, 
 	if err != nil {
 		return err
 	}
-	startUTC, endUTC := localDayRangeUTC(localDate, settings.Timezone)
+	// The distillation "day" is anchored to the distillation timezone when one is
+	// pinned (Settings → Memory & context), else the user's timezone.
+	dayTZ := settings.Timezone
+	if settings.DistillTZ != "" {
+		dayTZ = settings.DistillTZ
+	}
+	startUTC, endUTC := localDayRangeUTC(localDate, dayTZ)
 	msgs, err := o.db.MessagesForUserInRange(ctx, userID, startUTC, endUTC)
 	if err != nil {
 		return err
@@ -267,14 +292,36 @@ func (o *Orchestrator) SaveDailyDistillation(ctx context.Context, userID int64, 
 		return err
 	}
 	// Tell the user what was distilled (unless they've turned notifications off).
-	// The distillation run itself is silent; this is a separate user-facing note.
+	// The distillation run itself is silent; this is a separate user-facing note,
+	// sent to the configured distillation notify channel.
 	if settings.DistillNotify {
 		note := fmt.Sprintf("📝 Saved today's memory note (%s):\n\n%s", localDate, strings.TrimSpace(res.FinalText))
-		if derr := o.DeliverToUser(ctx, userID, note); derr != nil {
+		if derr := o.deliverToTarget(ctx, userID, settings.DistillNotifyTarget, note); derr != nil {
 			o.log.Warn("distillation notify failed", "user_id", userID, "err", derr)
 		}
 	}
 	return nil
+}
+
+// deliverToTarget delivers to an explicit destination: "" = the user's default
+// delivery channel, "web" = the web conversation, "tg:<botID>:<chatID>" = that
+// specific paired chat (falling back to the default channel so a note is never
+// silently dropped).
+func (o *Orchestrator) deliverToTarget(ctx context.Context, userID int64, target, text string) error {
+	switch {
+	case strings.HasPrefix(target, "tg:"):
+		if botID, chatID, ok := parseTGDelivery(target); ok && o.telegram != nil {
+			if err := o.telegram.SendToChat(ctx, userID, botID, chatID, text); err == nil {
+				return nil
+			}
+			o.log.Warn("target delivery failed; falling back to default channel", "user_id", userID, "target", target)
+		}
+		return o.DeliverToUser(ctx, userID, text)
+	case target == "web":
+		return o.deliverToWeb(ctx, userID, text)
+	default:
+		return o.DeliverToUser(ctx, userID, text)
+	}
 }
 
 // localDayRangeUTC returns the [start, end) UTC timestamps ('YYYY-MM-DD HH:MM:SS')
