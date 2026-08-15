@@ -10,7 +10,11 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-var tmpl = template.Must(template.New("").ParseFS(templatesFS, "templates/*.html"))
+// tmpl carries a small FuncMap: appVersion lets any template (e.g. the footer)
+// show the build version without every handler threading it through pageData.
+var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
+	"appVersion": func() string { return appVersion },
+}).ParseFS(templatesFS, "templates/*.html"))
 
 // pageData is the data passed to a template. Common keys (User, Title, Flash,
 // FlashKind) are filled by render if absent.

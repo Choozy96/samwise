@@ -208,6 +208,29 @@ func (s *Server) handleFileView(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "wsfile", data)
 }
 
+// handleFileDownload serves a workspace file as a download (Content-Disposition
+// attachment) — for binaries like .xlsx and for grabbing a file the assistant
+// produced. Same path guards as the viewer.
+func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r.Context())
+	root := s.orch.WorkspaceDir(u.ID)
+	rel := strings.Trim(filepath.ToSlash(r.URL.Query().Get("path")), "/")
+	target, ok := workspacePath(root, rel)
+	if !ok {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil || info.IsDir() {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	name := filepath.Base(target)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+	http.ServeFile(w, r, target)
+}
+
 // handleFileSave overwrites an existing text file with edited content from the
 // viewer. Textarea CRLFs are normalized so scripts keep working.
 func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
