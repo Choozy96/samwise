@@ -27,6 +27,22 @@ const OperationalGuidance = `Behavior:
 // untrusted-tool-output rule, used when an agent has no soul.
 var basePrompt = identityIntro + "\n\n" + OperationalGuidance + "\n\n" + securityNote
 
+// appVersion is the build version, injected into the system prompt so the agent
+// knows which Samwise release it's running. Set via SetVersion at startup.
+var appVersion string
+
+// SetVersion records the build version for the system prompt.
+func SetVersion(v string) { appVersion = v }
+
+// versionPromptLine is the system-prompt line telling the agent its version
+// (empty when the build version isn't set, e.g. in tests).
+func versionPromptLine() string {
+	if appVersion == "" {
+		return ""
+	}
+	return fmt.Sprintf("\nYou are running Samwise version %s. If the user asks what version you're on, tell them this.", appVersion)
+}
+
 // platformCapabilities tells the agent what it's running on and what it can do —
 // persona-independent product knowledge, injected for every agent (custom soul or
 // default) so it can answer "how do I…" questions and operate features correctly
@@ -37,6 +53,7 @@ You run as an agent inside Samwise, a self-hosted personal-assistant platform. T
 - Scheduling: recurring jobs that run you on a schedule (job_create / job_list / job_update) and one-off reminders (reminder_set). Schedules follow the user's timezone by default, or can be PINNED to a fixed zone with the timezone param ("keep this at 3pm Singapore time"). Each job can also set its own delivery destination.
 - Skills: reusable playbooks the user installs; follow them when relevant or asked by name. A skill with an entrypoint is "runnable" — execute it with skill_run (name + input) to get its output; this runs only that skill's script in a sandbox, never a shell.
 - Settings & secrets: per-user timezone, delivery channel, model/runtime (get_settings); API tokens for your scripts live in the Secrets settings.
+- Creating & sending files: you can produce files in your workspace — CSV, Excel (.xlsx, via python's openpyxl), Markdown, plain text, and more — then hand them to the user with send_file (path + optional caption). It arrives as a document on Telegram, or a download on the web. Write the file first, then send it. Use this whenever a table/report/export is more useful as a file than as a wall of text.
 - Self-customization: you can create/edit your own skills (skill_create / skill_update), create and switch personas and even edit your own instructions (agent_create / agent_switch / agent_update), and change preferences (update_settings, set_timezone). Do this when the user asks you to remember how to behave, take on a role, or change a setting — don't just promise, use the tool.
 - Group access control: in group chats, each skill and each safe tool can be opened to everyone or kept to paired (registered) users — set_skill_audience / set_tool_audience. The write/shell tools (Bash, Write, Edit) are paired-only and can only be opened to everyone if the deployment explicitly allows it (most don't) — and even then it's dangerous, so confirm the user really means it.
 For how any feature actually works — schedule syntax, memory scopes, skills, Telegram groups, settings — call read_guide: it returns your own user guide. Call it with no argument first to list the sections, then again with a section name. The guide is written for the user and references the web UI, so use it to explain or carry out features on their behalf. Don't claim capabilities the guide doesn't list.`
@@ -76,6 +93,7 @@ func (o *Orchestrator) assemble(ctx context.Context, user *store.User, settings 
 	}
 	sb.WriteString("\n\n")
 	sb.WriteString(platformCapabilities)
+	sb.WriteString(versionPromptLine())
 	sb.WriteString("\n\n# User profile\n")
 	if agent != nil {
 		fmt.Fprintf(&sb, "- Agent: %s\n", agent.Name)

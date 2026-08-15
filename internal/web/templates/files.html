@@ -16,7 +16,7 @@
       <tr>
         <td class="wrap-cell">
           {{if .Dir}}📁 <a href="/files?path={{.Rel}}"><strong>{{.Name}}</strong></a>
-          {{else}}📄 <a href="/files/view?path={{.Rel}}"><code>{{.Name}}</code></a>{{end}}
+          {{else}}📄 <a href="/files/view?path={{.Rel}}"><code>{{.Name}}</code></a> <a href="/files/download?path={{.Rel}}" class="muted" style="font-size:.8rem" title="Download">⬇</a>{{end}}
         </td>
         <td class="muted">{{.Size}}</td>
         <td class="muted">{{.Modified}}</td>
@@ -68,7 +68,7 @@
 
 {{define "wsfile"}}{{template "header" .}}
 <p style="margin-bottom:.5rem"><a href="{{if .DirRel}}/files?path={{.DirRel}}{{else}}/files{{end}}">← Back to Files</a></p>
-<h1 style="font-size:1.1rem"><code>{{.Path}}</code></h1>
+<h1 style="font-size:1.1rem"><code>{{.Path}}</code> <a href="/files/download?path={{.Path}}" class="btn secondary" style="font-size:.8rem; vertical-align:middle">⬇ Download</a></h1>
 {{if .Note}}<p class="muted">{{.Note}}</p>{{end}}
 {{if .Editable}}
 <form method="post" action="/files/save">

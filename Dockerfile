@@ -25,6 +25,7 @@ RUN apt-get update \
     # a sandbox and skills run with the system python3, not a venv.
     && pip3 install --no-cache-dir --break-system-packages \
         requests python-dotenv tzdata \
+        openpyxl \
         google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2 \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && rm -rf /var/lib/apt/lists/*

@@ -252,6 +252,20 @@ is hidden and can't be touched from here. Every change is recorded in your Audit
 log, and the assistant sees your edits on its next run — handy for tweaking a
 skill's script by hand.
 
+### Getting files from the assistant
+
+The assistant can **create files and send them to you** — a spreadsheet
+(**.xlsx**), **CSV**, **Markdown**, plain **text**, and more. Just ask (e.g.
+"export my expenses as an Excel file" or "give me that list as a CSV"). It writes
+the file into your workspace and delivers it:
+
+- **On Telegram**, it arrives as a **document** you can download or open.
+- **On the web**, it posts a note and the file appears here in **Files** with a
+  **⬇ Download** button (every file has one).
+
+Under the hood it uses a `send_file` capability; only registered users can
+trigger file sends.
+
 ## Skills
 
 **Skills** are markdown instructions that shape how the assistant does a task

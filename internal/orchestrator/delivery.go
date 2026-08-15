@@ -3,6 +3,9 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +13,10 @@ import (
 	"samwise/internal/runtime"
 	"samwise/internal/store"
 )
+
+// maxSendFileBytes caps a delivered file. Telegram's bot upload ceiling is
+// 50 MB; stay under it.
+const maxSendFileBytes = 45 << 20
 
 // ChannelSender delivers a message to a user over an external channel
 // (Telegram). The web channel is delivered in-process by appending to the
@@ -26,6 +33,10 @@ type ChannelSender interface {
 	// SendToChat delivers to an explicit bot+chat (a specific paired chat chosen
 	// as a job's delivery destination).
 	SendToChat(ctx context.Context, userID, botID, chatID int64, text string) error
+	// SendFile / SendFileToChat upload a document (a file the agent produced) to
+	// the user's primary-bot chat, or to an explicit bot+chat.
+	SendFile(ctx context.Context, userID int64, name string, data []byte, caption string) error
+	SendFileToChat(ctx context.Context, userID, botID, chatID int64, name string, data []byte, caption string) error
 }
 
 // SetTelegramSender wires the Telegram delivery sink (MVP step 6). Until set,
@@ -81,6 +92,77 @@ func (o *Orchestrator) DeliverToUser(ctx context.Context, userID int64, text str
 		o.log.Warn("telegram delivery failed; delivering to web", "user_id", userID, "err", err)
 	}
 	return o.deliverToWeb(ctx, userID, text)
+}
+
+// SendWorkspaceFile reads a file from the user's workspace and delivers it to
+// the run's origin chat, the user's default channel, or the web portal — as a
+// Telegram document, or (on web) a note pointing to the downloadable file. rel
+// is workspace-relative and guarded (no traversal; the internal .claude dir is
+// off-limits). Used by the send_file tool so the agent can hand the user a CSV /
+// xlsx / markdown / text file it produced.
+func (o *Orchestrator) SendWorkspaceFile(ctx context.Context, userID, botID, chatID int64, rel, caption string) error {
+	abs, name, ok := o.resolveWorkspaceFile(userID, rel)
+	if !ok {
+		return fmt.Errorf("path not allowed: %q", rel)
+	}
+	info, err := os.Stat(abs)
+	if err != nil || info.IsDir() {
+		return fmt.Errorf("no such file: %s", rel)
+	}
+	if info.Size() > maxSendFileBytes {
+		return fmt.Errorf("file too large (%d bytes; max %d)", info.Size(), maxSendFileBytes)
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return err
+	}
+
+	// Origin telegram chat wins; else the user's default channel; else web.
+	if chatID != 0 && o.telegram != nil {
+		return o.telegram.SendFileToChat(ctx, userID, botID, chatID, name, data, caption)
+	}
+	s, err := o.db.GetSettings(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(s.DeliveryChannel, "tg:") && o.telegram != nil {
+		if b, c, ok := parseTGDelivery(s.DeliveryChannel); ok {
+			return o.telegram.SendFileToChat(ctx, userID, b, c, name, data, caption)
+		}
+	}
+	if s.DeliveryChannel == "telegram" && o.telegram != nil {
+		return o.telegram.SendFile(ctx, userID, name, data, caption)
+	}
+	// Web: the file is in the workspace; point the user at it (downloadable from
+	// the Files page). A relative link keeps it clickable behind any proxy path.
+	note := "📎 I've prepared a file for you: " + name
+	if caption != "" {
+		note = "📎 " + caption + "\nFile: " + name
+	}
+	note += "\nDownload it from the Files page: /files/view?path=" + rel
+	return o.deliverToWeb(ctx, userID, note)
+}
+
+// resolveWorkspaceFile joins a workspace-relative path safely under the user's
+// workspace, rejecting traversal and the internal .claude directory.
+func (o *Orchestrator) resolveWorkspaceFile(userID int64, rel string) (abs, name string, ok bool) {
+	ws := o.workspace(userID)
+	// Normalize with path (always forward-slash) so the segment checks are
+	// correct regardless of the host OS separator.
+	clean := strings.TrimPrefix(path.Clean("/"+filepath.ToSlash(rel)), "/")
+	if clean == "" || clean == "." {
+		return "", "", false
+	}
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == ".claude" {
+			return "", "", false
+		}
+	}
+	abs = filepath.Join(ws, filepath.FromSlash(clean))
+	if abs != ws && !strings.HasPrefix(abs, ws+string(os.PathSeparator)) {
+		return "", "", false
+	}
+	return abs, filepath.Base(abs), true
 }
 
 // deliverToWeb appends text to the active agent's web conversation so it shows
