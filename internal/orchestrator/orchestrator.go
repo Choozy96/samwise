@@ -484,6 +484,10 @@ func (o *Orchestrator) SkillBundleDir(userID int64, name string) string {
 // absolute path. Absolute matters because the adapter sets the process cwd to
 // this dir and also passes file paths (e.g. --append-system-prompt-file) the
 // harness resolves against that cwd — a relative path would be joined twice.
+// WorkspaceDir exposes a user's workspace root for read-only surfaces (the web
+// Files browser). Callers must path-guard anything user-supplied under it.
+func (o *Orchestrator) WorkspaceDir(userID int64) string { return o.workspace(userID) }
+
 func (o *Orchestrator) workspace(userID int64) string {
 	root := filepath.Join(filepath.Dir(o.cfg.DBPath), "workspaces")
 	p := filepath.Join(root, strconv.FormatInt(userID, 10))

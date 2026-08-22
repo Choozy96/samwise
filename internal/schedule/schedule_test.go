@@ -122,3 +122,20 @@ func TestPeriodKeyDistinctDays(t *testing.T) {
 		t.Errorf("period key = %s, want 2026-06-13", d1)
 	}
 }
+
+// TestResolveTZ covers the job timezone pin: blank follows the user, a valid
+// IANA name pins, junk and the ambiguous "Local" are rejected.
+func TestResolveTZ(t *testing.T) {
+	if m, r, err := ResolveTZ(""); err != nil || m != "user_local" || r != "" {
+		t.Errorf("blank: got (%q,%q,%v)", m, r, err)
+	}
+	if m, r, err := ResolveTZ(" Asia/Singapore "); err != nil || m != "fixed_tz" || r != "Asia/Singapore" {
+		t.Errorf("iana: got (%q,%q,%v)", m, r, err)
+	}
+	if _, _, err := ResolveTZ("Narnia/Wardrobe"); err == nil {
+		t.Error("unknown zone should be rejected")
+	}
+	if _, _, err := ResolveTZ("Local"); err == nil {
+		t.Error("'Local' should be rejected")
+	}
+}

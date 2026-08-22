@@ -17,6 +17,8 @@
     </div>
     <label for="schedule_spec">Schedule</label>
     <input id="schedule_spec" name="schedule_spec" placeholder="daily@07:00  ·  weekly@Mon 09:00  ·  once@2026-06-20T15:00" required>
+    <label for="tz">Timezone <span class="muted">(blank = your timezone, follows you when you travel)</span></label>
+    <input id="tz" name="timezone" list="tzlist" placeholder="e.g. Asia/Singapore — pins the schedule to that zone" style="max-width:26rem">
     <label for="body">Message / prompt</label>
     <textarea id="body" name="body" rows="2" required placeholder="For agent_run: the prompt. For direct_message: the text to send."></textarea>
     <label for="delivery">Deliver result to <span class="muted">(agent_run only)</span></label>
@@ -35,6 +37,7 @@
 </div>
 
 <datalist id="tgchats">{{range .ChatHints}}<option value="{{.ChatID}}">{{.Label}}</option>{{end}}</datalist>
+<datalist id="tzlist">{{range .TZOptions}}<option value="{{.Name}}">{{.Label}}</option>{{end}}</datalist>
 
 <div class="panel">
   <h2>Your jobs</h2>
@@ -46,7 +49,7 @@
       <tr>
         <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">(unnamed)</span>{{end}}</td>
         <td><span class="pill">{{.Type}}</span></td>
-        <td><code>{{.ScheduleSpec}}</code></td>
+        <td><code>{{.ScheduleSpec}}</code>{{if eq .TZMode "fixed_tz"}} <span class="pill" title="Pinned — doesn't shift when you travel">{{.TZRef}}</span>{{end}}</td>
         <td class="muted" data-sort="{{.NextFireUTC}}">{{if .Enabled}}{{.NextLocal}}{{else}}<span class="muted">paused</span>{{end}}</td>
         <td class="muted wrap-cell">{{.Summary}}</td>
         <td>
@@ -69,6 +72,8 @@
               <input name="name" value="{{.Name}}">
               <label style="margin-top:.4rem">Schedule</label>
               <input name="schedule_spec" value="{{.ScheduleSpec}}" required>
+              <label style="margin-top:.4rem">Timezone <span class="muted">(blank = follows you)</span></label>
+              <input name="timezone" list="tzlist" value="{{if eq .TZMode "fixed_tz"}}{{.TZRef}}{{end}}" placeholder="e.g. Asia/Singapore">
               <label style="margin-top:.4rem">{{if eq .Type "agent_run"}}Prompt{{else}}Message{{end}}</label>
               <textarea name="body" rows="2" required>{{.Summary}}</textarea>
               {{if eq .Type "agent_run"}}

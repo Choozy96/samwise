@@ -102,7 +102,13 @@ func (s *Scheduler) runDistillation(ctx context.Context, now time.Time) {
 		if err != nil {
 			continue
 		}
-		loc := schedule.LocationFor("user_local", "", settings.Timezone)
+		// The distillation "day" (and its end-of-day moment) is anchored to the
+		// pinned distillation zone when set, else the user's timezone.
+		tzMode, tzRef := "user_local", ""
+		if settings.DistillTZ != "" {
+			tzMode, tzRef = "fixed_tz", settings.DistillTZ
+		}
+		loc := schedule.LocationFor(tzMode, tzRef, settings.Timezone)
 		localNow := now.In(loc)
 		localDate := localNow.Format("2006-01-02")
 

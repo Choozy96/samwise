@@ -150,11 +150,17 @@ func (db *DB) ListTopics(ctx context.Context, userID, agentScope int64) ([]strin
 // ListSemantic returns a user's semantic memories for the portal editor, newest
 // first.
 func (db *DB) ListSemantic(ctx context.Context, userID, agentScope int64, limit int) ([]SemanticMemory, error) {
+	return db.ListSemanticPage(ctx, userID, agentScope, limit, 0)
+}
+
+// ListSemanticPage is ListSemantic with an offset, for paged / infinite-scroll
+// browsing (newest first).
+func (db *DB) ListSemanticPage(ctx context.Context, userID, agentScope int64, limit, offset int) ([]SemanticMemory, error) {
 	clause, args := scopeFilter("agent_id", agentScope)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, COALESCE(agent_id,0), topic, kind, content, source, created_at, COALESCE(expires_at,'')
-		   FROM memory_semantic WHERE user_id = ?`+clause+` ORDER BY id DESC LIMIT ?`,
-		append(append([]any{userID}, args...), limit)...)
+		   FROM memory_semantic WHERE user_id = ?`+clause+` ORDER BY id DESC LIMIT ? OFFSET ?`,
+		append(append([]any{userID}, args...), limit, offset)...)
 	if err != nil {
 		return nil, err
 	}

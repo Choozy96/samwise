@@ -24,13 +24,14 @@
       <div class="row">
         <div>
           <label for="timezone">Timezone (IANA)</label>
-          <input id="timezone" name="timezone" value="{{.S.Timezone}}" placeholder="Asia/Singapore">
+          <input id="timezone" name="timezone" list="tzlist" value="{{.S.Timezone}}" placeholder="Asia/Singapore">
         </div>
         <div>
-          <label for="delivery_channel">Delivery channel</label>
+          <label for="delivery_channel">Default delivery destination</label>
           <select id="delivery_channel" name="delivery_channel">
             <option value="web"{{if eq .S.DeliveryChannel "web"}} selected{{end}}>Web portal</option>
-            <option value="telegram"{{if eq .S.DeliveryChannel "telegram"}} selected{{end}}>Telegram</option>
+            <option value="telegram"{{if eq .S.DeliveryChannel "telegram"}} selected{{end}}>Telegram (primary bot)</option>
+            {{range .DeliveryTargets}}<option value="{{.Value}}"{{if eq $.S.DeliveryChannel .Value}} selected{{end}}>{{.Label}}</option>{{end}}
           </select>
         </div>
         <div>
@@ -110,12 +111,26 @@
   <div class="tabpanel" data-panel="memory" hidden>
     <div class="panel">
       <h2>Memory &amp; distillation</h2>
-      <div class="field">
-        <label for="distillation_time">End-of-day distillation time (local)</label>
-        <input id="distillation_time" name="distillation_time" value="{{.S.DistillationTime}}" placeholder="23:30">
+      <div class="row">
+        <div>
+          <label for="distillation_time">End-of-day distillation time (local)</label>
+          <input id="distillation_time" name="distillation_time" value="{{.S.DistillationTime}}" placeholder="23:30">
+        </div>
+        <div>
+          <label for="distill_tz">Distillation timezone <span class="muted">(blank = yours)</span></label>
+          <input id="distill_tz" name="distill_tz" list="tzlist" value="{{.S.DistillTZ}}" placeholder="e.g. Asia/Singapore — pins the day boundary">
+        </div>
       </div>
-      <label style="display:block; margin-bottom:.5rem"><input type="checkbox" name="distill_notify" value="1"{{if .S.DistillNotify}} checked{{end}}> Notify me with a message after the end-of-day distillation</label>
-      <p class="muted">Each day the assistant reads the day's conversation and saves a dated <strong>memory note</strong> (it also refreshes it every few hours). With notifications on, it sends you that note when the end-of-day pass runs, so you can see what it remembered. See the <a href="/guide">Guide</a> for how memory works.</p>
+      <label style="display:block; margin:.5rem 0"><input type="checkbox" name="distill_notify" value="1"{{if .S.DistillNotify}} checked{{end}}> Notify me with a message after the end-of-day distillation</label>
+      <div class="field">
+        <label for="distill_notify_target">Send that note to</label>
+        <select id="distill_notify_target" name="distill_notify_target">
+          <option value=""{{if eq .S.DistillNotifyTarget ""}} selected{{end}}>Default delivery destination</option>
+          <option value="web"{{if eq .S.DistillNotifyTarget "web"}} selected{{end}}>Web portal</option>
+          {{range .DeliveryTargets}}<option value="{{.Value}}"{{if eq $.S.DistillNotifyTarget .Value}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </div>
+      <p class="muted">Each day the assistant reads the day's conversation and saves a dated <strong>memory note</strong> (it also refreshes it every few hours). With notifications on, it sends you that note when the end-of-day pass runs. Pinning the <strong>distillation timezone</strong> keeps the "day" boundary fixed when you travel. See the <a href="/guide">Guide</a> for how memory works.</p>
     </div>
 
     <div class="panel">
@@ -157,6 +172,8 @@
     <form method="post" action="/onboarding/reset"><button class="secondary" type="submit">Re-run setup</button></form>
   </div>
 </div>
+
+<datalist id="tzlist">{{range .TZOptions}}<option value="{{.Name}}">{{.Label}}</option>{{end}}</datalist>
 
 <script>
   (function () {

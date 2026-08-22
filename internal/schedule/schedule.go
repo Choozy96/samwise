@@ -98,6 +98,23 @@ func LocationFor(tzMode, tzRef, userTZ string) *time.Location {
 	}
 }
 
+// ResolveTZ validates an optional timezone choice for a job. "" means the
+// schedule follows the user's timezone (user_local); a valid IANA name pins it
+// to that zone (fixed_tz). Unknown names and the ambiguous "Local" are rejected.
+func ResolveTZ(name string) (tzMode, tzRef string, err error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "user_local", "", nil
+	}
+	if strings.EqualFold(name, "local") {
+		return "", "", fmt.Errorf("schedule: use an explicit IANA zone (e.g. Asia/Singapore), not %q", name)
+	}
+	if _, lerr := time.LoadLocation(name); lerr != nil {
+		return "", "", fmt.Errorf("schedule: unknown timezone %q (use an IANA name like Asia/Singapore or Europe/London)", name)
+	}
+	return "fixed_tz", name, nil
+}
+
 // NextFireUTC returns the first occurrence strictly after `after`, in UTC.
 // ok is false when there is no future occurrence (a one-shot already in the
 // past). Using time.Date to build wall times makes this DST-correct.

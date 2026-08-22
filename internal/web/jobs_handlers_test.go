@@ -93,3 +93,36 @@ func TestResolveTGChat(t *testing.T) {
 		t.Errorf("CROSS-USER: bob resolved alice's group: (%q,%v)", got, ok)
 	}
 }
+
+// TestSanitizeDefaultDelivery is the allow-list for the Settings default
+// delivery destination: web, telegram, or a chat the user is paired to — an
+// unpaired/garbage value keeps the current setting.
+func TestSanitizeDefaultDelivery(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	uid, err := db.CreateUser(ctx, "alice", "h", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateIdentity(ctx, store.ChannelIdentity{
+		UserID: uid, Channel: "telegram", BotID: 7, ExternalID: "555", ChatID: "555",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: db}
+	r := httptest.NewRequest("GET", "/settings", nil)
+
+	cases := map[string]string{
+		"web":        "web",
+		"telegram":   "telegram",
+		"tg:7:555":   "tg:7:555", // paired chat → accepted
+		"tg:9:999":   "web",      // not paired → keep current ("web")
+		"tg:7:-1000": "web",      // unknown chat → keep current
+		"garbage":    "web",
+	}
+	for in, want := range cases {
+		if got := s.sanitizeDefaultDelivery(r, uid, in, "web"); got != want {
+			t.Errorf("sanitizeDefaultDelivery(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
