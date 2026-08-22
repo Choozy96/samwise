@@ -36,6 +36,13 @@ type streamLine struct {
 	SessionID string `json:"session_id"`
 	Model     string `json:"model"`
 
+	// init event: per-MCP-server connection status ("connected"/"failed"/…),
+	// parsed so an attach failure is visible in OUR logs instead of silent.
+	MCPServers []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"mcp_servers"`
+
 	Message *struct {
 		Model   string `json:"model"`
 		Role    string `json:"role"`
@@ -215,6 +222,15 @@ func (c *ClaudeHeadless) handleEvent(ev streamLine, res *Result, acc *strings.Bu
 			if res.Model == "" {
 				res.Model = ev.Model
 			}
+			// Surface MCP attach failures loudly: the run continues without those
+			// tools (memory/jobs for "core"), which otherwise looks like the agent
+			// mysteriously "forgot" its abilities.
+			for _, srv := range ev.MCPServers {
+				if srv.Status != "" && srv.Status != "connected" {
+					c.log.Error("headless: mcp server failed to attach",
+						"server", srv.Name, "status", srv.Status, "session", ev.SessionID)
+				}
+			}
 		}
 	case "assistant":
 		if ev.Message == nil {
@@ -288,6 +304,16 @@ func agentEnv(userSecrets map[string]string) []string {
 	}
 	for k, v := range userSecrets {
 		env = append(env, k+"="+v)
+	}
+	// Give MCP servers generous connect/tool timeouts: on a small, loaded VPS
+	// (concurrent runs, swap pressure) claude's default MCP startup timeout can
+	// expire before the in-process core host answers, and the run silently loses
+	// its memory/job tools. Respect explicit operator overrides.
+	if _, ok := userSecrets["MCP_TIMEOUT"]; !ok && os.Getenv("MCP_TIMEOUT") == "" {
+		env = append(env, "MCP_TIMEOUT=60000")
+	}
+	if _, ok := userSecrets["MCP_TOOL_TIMEOUT"]; !ok && os.Getenv("MCP_TOOL_TIMEOUT") == "" {
+		env = append(env, "MCP_TOOL_TIMEOUT=120000")
 	}
 	return env
 }

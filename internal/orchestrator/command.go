@@ -13,8 +13,8 @@ import (
 	"samwise/internal/store"
 )
 
-// TryCommand intercepts slash commands typed in any channel (web and
-// Telegram alike). It returns the reply text and handled=true when the message was a
+// TryCommand intercepts slash commands typed in any channel (spec parity: web +
+// Telegram). It returns the reply text and handled=true when the message was a
 // recognized command; otherwise handled=false and the caller dispatches the
 // message to the agent as normal. Unrecognized "/..." messages are passed
 // through to the agent (handled=false) so they aren't swallowed.
@@ -399,6 +399,7 @@ const adminHelp = "Admin commands (admins only):\n" +
 	"• /admin disable <username> — disable a user\n" +
 	"• /admin enable <username> — re-enable a user\n" +
 	"• /admin resetpw <username> <new-password> — reset a user's password\n" +
+	"• /admin usage [1d|7d|30d] [user|model|both] — token usage & cost across all users\n" +
 	"⚠️ Subcommands with a password expose it to this channel — prefer the web Admin page and delete the message after."
 
 // cmdAdmin handles admin-only user management. The calling user must be an admin;
@@ -431,9 +432,84 @@ func (o *Orchestrator) cmdAdmin(ctx context.Context, userID int64, arg string) s
 		return o.adminSetDisabled(ctx, rest, false)
 	case "resetpw", "resetpassword":
 		return o.adminResetPw(ctx, rest)
+	case "usage", "cost":
+		return o.adminUsage(ctx, rest)
 	default:
 		return "Unknown admin subcommand. Try /admin help."
 	}
+}
+
+// adminUsage reports token usage + cost across all users for a quick period,
+// grouped by user (default), model, or both. Mirrors the Admin page panel.
+func (o *Orchestrator) adminUsage(ctx context.Context, rest string) string {
+	days, group := 7, "user"
+	for _, f := range strings.Fields(strings.ToLower(rest)) {
+		switch f {
+		case "1d", "24h", "day":
+			days = 1
+		case "7d", "week":
+			days = 7
+		case "30d", "1m", "month":
+			days = 30
+		case "user", "users":
+			group = "user"
+		case "model", "models":
+			group = "model"
+		case "both", "user_model":
+			group = "user_model"
+		case "total":
+			group = ""
+		default:
+			return "Usage: /admin usage [1d|7d|30d] [user|model|both|total]"
+		}
+	}
+	from := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	rows, err := o.db.UsageReport(ctx, from, "", group)
+	if err != nil {
+		return "Couldn't read the usage data."
+	}
+	if len(rows) == 0 {
+		return fmt.Sprintf("No runs in the last %dd.", days)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Usage — last %dd (runs · in · out · cache-w · cache-r · cost):\n", days)
+	var total store.UsageRow
+	for _, u := range rows {
+		name := ""
+		switch group {
+		case "user":
+			name = u.Username
+		case "model":
+			name = u.Model
+			if name == "" {
+				name = "(default)"
+			}
+		case "user_model":
+			m := u.Model
+			if m == "" {
+				m = "(default)"
+			}
+			name = u.Username + " · " + m
+		default:
+			name = "total"
+		}
+		fmt.Fprintf(&b, "• %s: %d · %s · %s · %s · %s · $%.4f\n", name, u.Runs,
+			store.HumanTokens(u.InputTokens), store.HumanTokens(u.OutputTokens),
+			store.HumanTokens(u.CacheWrite), store.HumanTokens(u.CacheRead), u.CostUSD)
+		total.Runs += u.Runs
+		total.InputTokens += u.InputTokens
+		total.OutputTokens += u.OutputTokens
+		total.CacheWrite += u.CacheWrite
+		total.CacheRead += u.CacheRead
+		total.CostUSD += u.CostUSD
+	}
+	if group != "" && len(rows) > 1 {
+		fmt.Fprintf(&b, "Σ total: %d · %s · %s · %s · %s · $%.4f\n", total.Runs,
+			store.HumanTokens(total.InputTokens), store.HumanTokens(total.OutputTokens),
+			store.HumanTokens(total.CacheWrite), store.HumanTokens(total.CacheRead), total.CostUSD)
+	}
+	b.WriteString("(cost is runtime-reported — indicative under a subscription)")
+	return b.String()
 }
 
 func (o *Orchestrator) adminListUsers(ctx context.Context) string {
@@ -639,7 +715,7 @@ func helpText() string {
 	return strings.Join([]string{
 		"Commands:",
 		"• /agent [name] — show your agents or switch the active one",
-		"• /model [name] — show or set the chat model (default, opus, sonnet, haiku)",
+		"• /model [name] — show or set the ACTIVE AGENT's model (opus48, sonnet5, fable5, haiku45, default, or a raw id)",
 		"• /runtime [name] — show or set the access method (channels, sdk, codex)",
 		"• /status — show your current agent, access method, model, timezone, delivery",
 		"• /timezone [IANA] — show or set your timezone (e.g. Asia/Singapore)",
@@ -655,7 +731,7 @@ func helpText() string {
 		"• /new — start a fresh conversation (keeps memory & history)",
 		"• /usage — recent runs and token usage by type",
 		"• /password <current> <new> — change your password (prefer the web portal; the message is exposed on the channel)",
-		"• /admin — (admins) manage users — e.g. /admin add <username> <password>; type /admin for the full list (users/add/disable/enable/resetpw)",
+		"• /admin — (admins) manage users — e.g. /admin add <username> <password>; type /admin for the full list (users/add/disable/enable/resetpw/usage)",
 		"• /refresh-claude — refresh & verify the Claude login (recover if its token lapsed)",
 		"• /help — this list",
 		"Anything not starting with one of these is sent to your assistant as usual.",
@@ -672,14 +748,16 @@ func (o *Orchestrator) statusText(ctx context.Context, userID int64) string {
 		avail = " (not available yet — runs fall back to Claude SDK)"
 	}
 	agentName := "Assistant"
+	agentModelID := ""
 	if a, err := o.db.GetActiveAgent(ctx, userID); err == nil {
 		agentName = a.Name
+		agentModelID = a.Model
 	}
 	return strings.Join([]string{
 		"Current configuration:",
 		"• Agent: " + agentName,
 		"• Access method: " + RuntimeLabel(s.ActiveRuntime) + avail,
-		"• Model: " + ModelLabel(modelHint(s.ModelHints, "chat")),
+		"• Model: " + o.ModelLabel(ctx, agentModelID) + " (per agent — change with /model)",
 		"• Timezone: " + s.Timezone,
 		"• Delivery: " + s.DeliveryChannel,
 	}, "\n")
@@ -715,29 +793,40 @@ func (o *Orchestrator) cmdAgent(ctx context.Context, userID int64, arg string) s
 	return "Switched to agent: " + a.Name + ". New messages use it."
 }
 
+// cmdModel shows or sets the ACTIVE AGENT's model (models are per agent).
 func (o *Orchestrator) cmdModel(ctx context.Context, userID int64, arg string) string {
-	s, err := o.db.GetSettings(ctx, userID)
-	if err != nil {
-		return "Couldn't read your settings."
+	agent, err := o.db.GetActiveAgent(ctx, userID)
+	if err != nil || agent == nil {
+		return "Couldn't find your active agent."
 	}
 	if arg == "" {
 		var opts []string
-		for _, m := range Models {
+		for _, m := range o.ModelChoices(ctx) {
 			opts = append(opts, m.Alias)
 		}
-		return fmt.Sprintf("Current model: %s.\nSet with /model <name>. Options: %s.\nYou can also pass a full model id.",
-			ModelLabel(modelHint(s.ModelHints, "chat")), strings.Join(opts, ", "))
+		return fmt.Sprintf("Model for agent %q: %s.\nSet with /model <name>. Options: %s, default.\n"+
+			"You can also pass a full model id. This changes the ACTIVE agent — other agents keep theirs.",
+			agent.Name, o.ModelLabel(ctx, agent.Model), strings.Join(opts, ", "))
 	}
-	id, ok := ResolveModel(arg)
+	id, ok := o.ResolveModelInput(ctx, arg)
 	if !ok {
-		// Accept an arbitrary model id too, for forward compatibility.
-		id = strings.TrimSpace(arg)
+		// Unknown and not a plausible raw id: refuse rather than storing a value
+		// that would break the agent's next run — and suggest close matches.
+		reply := fmt.Sprintf("No model %q in the catalog.", strings.TrimSpace(arg))
+		if sugg := o.SuggestModels(ctx, arg, 3); len(sugg) > 0 {
+			var names []string
+			for _, m := range sugg {
+				names = append(names, fmt.Sprintf("%s (%s)", m.Alias, m.Label))
+			}
+			reply += " Did you mean: " + strings.Join(names, ", ") + "?"
+		}
+		return reply + "\nUse /model with no argument to list options. Full ids starting with claude- are accepted as-is."
 	}
-	s.ModelHints = SetChatModel(s.ModelHints, id)
-	if err := o.db.UpdateSettings(ctx, s); err != nil {
+	agent.Model = id
+	if err := o.db.UpdateAgent(ctx, *agent); err != nil {
 		return "Failed to save the model change."
 	}
-	return "Model set to " + ModelLabel(id) + "."
+	return fmt.Sprintf("Model for agent %q set to %s.", agent.Name, o.ModelLabel(ctx, id))
 }
 
 func (o *Orchestrator) cmdRuntime(ctx context.Context, userID int64, arg string) string {

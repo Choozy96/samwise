@@ -5,15 +5,19 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+
+	"samwise/internal/store"
 )
 
 //go:embed templates/*.html
 var templatesFS embed.FS
 
 // tmpl carries a small FuncMap: appVersion lets any template (e.g. the footer)
-// show the build version without every handler threading it through pageData.
+// show the build version without every handler threading it through pageData;
+// tokens renders token counts compactly (12.4k / 1.3M) for the usage panel.
 var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
 	"appVersion": func() string { return appVersion },
+	"tokens":     store.HumanTokens,
 }).ParseFS(templatesFS, "templates/*.html"))
 
 // pageData is the data passed to a template. Common keys (User, Title, Flash,

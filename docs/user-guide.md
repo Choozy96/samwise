@@ -42,8 +42,16 @@ jobs.
 
 ## Models & access methods
 
-- **Model** — which model answers you (e.g. Opus, Sonnet, Haiku). Set it in
-  **Settings**, per-agent on the **Agents** page, or in chat with `/model opus`.
+- **Model** — which model answers you. Models are set **per agent**: each agent
+  on the **Agents** page has its own model (blank = the runtime's default), and
+  `/model <name>` in chat changes the model of your **active agent** only —
+  other agents keep theirs. The assistant also **knows which model it's running
+  on**, so you can just ask it.
+- **Model names** carry their version so they're unambiguous: `opus48`,
+  `sonnet5`, `fable5`, `haiku45` (e.g. `/model fable5`). The list comes from a
+  catalog the **admin** manages, so new Claude releases can be added without a
+  redeploy; you can also type a raw model id (e.g. `claude-opus-5`) anywhere a
+  model is chosen.
 - **Access method** (runtime) — *how* the assistant runs. **Claude — SDK** is
   available today; **Claude — channels** and **ChatGPT — Codex** are coming.
   Set it in Settings or with `/runtime <name>`.
@@ -56,7 +64,7 @@ to the assistant:
 | Command | What it does |
 |---|---|
 | `/agent [name]` | List your agents, or switch the active one |
-| `/model [name]` | Show or set the chat model (default, opus, sonnet, haiku) |
+| `/model [name]` | Show or set the **active agent's** model (`opus48`, `sonnet5`, `fable5`, `haiku45`, `default`, or a raw model id) |
 | `/runtime [name]` | Show or set the access method (channels, sdk, codex) |
 | `/timezone [IANA]` | Show or set your timezone (e.g. `Asia/Singapore`); recomputes local schedules |
 | `/delivery [web\|telegram]` | Show or set where scheduled jobs are delivered |
@@ -72,7 +80,7 @@ to the assistant:
 | `/new` | Start a fresh conversation thread (memory & history are kept) |
 | `/usage` | Recent runs and token usage by type — input/output/cache (24h / 7d) |
 | `/password <current> <new>` | Change your password (prefer the web portal — the message is visible to the channel) |
-| `/admin …` | **Admins only** — manage users from chat: `users`, `add <user> <pass>`, `disable <user>`, `enable <user>`, `resetpw <user> <pass>` |
+| `/admin …` | **Admins only** — manage users & see usage from chat: `users`, `add`, `disable`, `enable`, `resetpw`, `usage` |
 | `/refresh-claude` | Refresh & verify the Claude login — recover if its token lapsed |
 | `/help` | List the commands |
 
@@ -87,6 +95,12 @@ Chat with your assistant from Telegram, with the same memory and agents.
    enter the code, and submit.
 4. Now message the bot normally — it shows a "typing…" indicator while it works.
    Slash commands work there too.
+
+You can send the bot **files, photos, voice notes, and more** — they're saved to
+your workspace for the assistant to work on. This also works **by reply**: reply
+to a message that carries a file or photo (yours or someone else's in a group)
+and address the bot — e.g. reply to a PDF with "@bot summarize this" — and the
+assistant receives that file along with your question.
 
 Set **Settings → Delivery channel** to Telegram to have scheduled jobs (like the
 briefing) delivered there.
@@ -366,7 +380,7 @@ Settings are organized into tabs:
   results, reminders, and notices land unless something sets its own: the web
   portal, your primary Telegram bot, or a **specific paired chat** — also
   settable in chat with "make this chat the default"), Telegram message format,
-  your active access method / model, and **agent tools (advanced)**: the assistant always has
+  your active access method (models are per agent — see the Agents page), and **agent tools (advanced)**: the assistant always has
   a default file/shell toolset; here you can switch on **individual** extra
   built-in tools (e.g. `WebFetch`/`WebSearch` to read pages and search the web).
   Each lists what it does, with a warning on the risky ones and a note on the ones
@@ -406,3 +420,106 @@ note — nothing breaks.
   what tools it called, and your **Memory** for anything it's holding onto.
 - **A registered tool isn't working** — confirm it's enabled under Extensions, and
   that any `npx` package is pre-installed.
+
+<!-- ADMIN GUIDE -->
+
+## Admin
+
+*This section is only shown to admins.* The **first account created** is the
+admin. Admins manage users, the model catalog, and see system health — but an
+admin **cannot** read other users' memory, chats, files, or conversations. The
+**Admin** link in the nav (and `/admin` in chat) is only visible to you.
+
+### Users
+
+On the **Admin** page:
+
+- **Create a user** — give a username and an initial password; hand those to the
+  person. New accounts are standard (non-admin) users.
+- **Disable / enable** — a disabled user can't log in and their bots stop
+  responding, without deleting their data.
+- **Reset a password** — set a new password for a user who's locked out, then
+  give it to them. (Admins change their *own* password in **Settings**, not here.)
+
+You can also do all of this from chat with the **`/admin`** command (alias
+`/users`):
+
+| Command | Does |
+|---|---|
+| `/admin users` | List users |
+| `/admin add <user> <pass>` | Create a user |
+| `/admin disable <user>` | Disable a user |
+| `/admin enable <user>` | Enable a user |
+| `/admin resetpw <user> <pass>` | Reset a user's password |
+| `/admin usage [1d\|7d\|30d] [user\|model\|both]` | Token usage & cost across all users |
+
+### Models
+
+The **Models** section on the Admin page is the catalog everyone picks from in
+**Settings** and with `/model`. You control it — **no redeploy needed** when a new
+Claude model ships:
+
+- **Add a model** — a **label** (what users see), an optional **alias** (for
+  `/model <alias>` — include the version, e.g. `opus5`), and a **model id** (what
+  the runtime receives). Example: label "Claude Opus 5", alias `opus5`, id
+  `claude-opus-5`. If a future Samwise update officially ships a model whose
+  alias you'd already added yourself, the update's entry **replaces yours** (the
+  official id/label wins); entries with other aliases are never touched.
+- **Edit / reorder** — change any field, or the sort order.
+- **Enable / disable** — *enabled* means the model appears in users' pickers and
+  its alias resolves in `/model`. Disabling **hides it from choosers** but
+  anyone who already selected it keeps using it (their setting stores the raw
+  model id) — it's for retiring options without breaking people.
+- **Delete** — removes it from the catalog; a user who had it selected keeps the
+  raw id (it just loses its friendly name).
+
+There is intentionally **no "default" row in the catalog** — "use the runtime's
+default model" is a built-in choice every picker offers on its own, so it can't
+be renamed, disabled, or deleted by accident.
+
+Users can always type a **raw model id** anywhere a model is chosen, so the
+catalog is about convenience and curation, not a hard restriction.
+
+### Usage & cost
+
+The **Usage & cost** panel on the Admin page reports token usage and
+runtime-reported cost across **all users**, from the runs log:
+
+- **Quick ranges** (1d / 7d / 30d) or a **custom UTC date range**.
+- **Group by** user, model, user × model, or just a total — with a totals row.
+- Cost is what the runtime reports per run; under a subscription it's
+  indicative (you pay the flat rate), but it's the right number for spotting
+  who or what is heavy.
+
+The same data is available in chat with **`/admin usage [1d|7d|30d]
+[user|model|both]`**, and the **assistant itself** can fetch it for you ("how
+much did we use this week, by user?") via an admin-only tool — it refuses
+non-admin users.
+
+### Anchor chat
+
+The **Anchor chat** is a designated announcement chat for the whole deployment —
+pick any chat you're paired to (typically a group everyone's in). When set,
+**scheduled results (cron output) land there by default**. Precedence, highest
+first:
+
+1. a job's own *Deliver result to* setting,
+2. a user's **specific default chat** (Settings → Default delivery destination
+   set to a particular chat),
+3. the **anchor chat**,
+4. the user's coarse channel preference (Telegram / web).
+
+Clearing it returns everyone to their own delivery settings. Note the privacy
+trade-off: with an anchor set, a user who never picked their own destination has
+their scheduled output posted to the shared chat.
+
+### System health
+
+The Admin page shows database status, the DB path, the user count, and the
+running **version** — a quick check that the deployment is healthy.
+
+### Installation, backups, updates
+
+Server setup, HTTPS, backups/restore, giving the server its own Claude login, and
+updating the image live in the **deployment guide** (`docs/DEPLOY.md` in the
+repo), not here — those are host-level operations rather than in-app admin.

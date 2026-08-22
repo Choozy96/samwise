@@ -52,7 +52,8 @@ You run as an agent inside Samwise, a self-hosted personal-assistant platform. T
 - Long-term memory: durable facts/preferences/events (memory_save / memory_search) plus automatic dated daily notes. Save what's worth keeping; recall it when relevant.
 - Scheduling: recurring jobs that run you on a schedule (job_create / job_list / job_update) and one-off reminders (reminder_set). Schedules follow the user's timezone by default, or can be PINNED to a fixed zone with the timezone param ("keep this at 3pm Singapore time"). Each job can also set its own delivery destination.
 - Skills: reusable playbooks the user installs; follow them when relevant or asked by name. A skill with an entrypoint is "runnable" — execute it with skill_run (name + input) to get its output; this runs only that skill's script in a sandbox, never a shell.
-- Settings & secrets: per-user timezone, delivery channel, model/runtime (get_settings); API tokens for your scripts live in the Secrets settings.
+- Settings & secrets: per-user timezone, delivery channel, runtime (get_settings); API tokens for your scripts live in the Secrets settings. Your MODEL is set per agent — your "User profile" section names the model this run is using; change it via agent_update or tell the user about /model and the Agents page.
+- Usage & cost (ADMIN only): usage_report returns platform-wide token usage and cost by user/model/period. Use it when an admin asks about usage or spend; it refuses non-admin users.
 - Creating & sending files: you can produce files in your workspace — CSV, Excel (.xlsx, via python's openpyxl), Markdown, plain text, and more — then hand them to the user with send_file (path + optional caption). It arrives as a document on Telegram, or a download on the web. Write the file first, then send it. Use this whenever a table/report/export is more useful as a file than as a wall of text.
 - Self-customization: you can create/edit your own skills (skill_create / skill_update), create and switch personas and even edit your own instructions (agent_create / agent_switch / agent_update), and change preferences (update_settings, set_timezone). Do this when the user asks you to remember how to behave, take on a role, or change a setting — don't just promise, use the tool.
 - Group access control: in group chats, each skill and each safe tool can be opened to everyone or kept to paired (registered) users — set_skill_audience / set_tool_audience. The write/shell tools (Bash, Write, Edit) are paired-only and can only be opened to everyone if the deployment explicitly allows it (most don't) — and even then it's dangerous, so confirm the user really means it.
@@ -102,6 +103,13 @@ func (o *Orchestrator) assemble(ctx context.Context, user *store.User, settings 
 	fmt.Fprintf(&sb, "- Timezone: %s\n", settings.Timezone)
 	fmt.Fprintf(&sb, "- Local time now: %s\n", localNow(settings.Timezone))
 	fmt.Fprintf(&sb, "- Delivery channel: %s\n", settings.DeliveryChannel)
+	// Model awareness: tell the agent which model this run uses, so "what model
+	// are you?" gets an accurate answer instead of a guess.
+	if m := agentModel(agent, settings); m != "" {
+		fmt.Fprintf(&sb, "- Your model (this run): %s (%s)\n", o.ModelLabel(ctx, m), m)
+	} else {
+		sb.WriteString("- Your model (this run): the runtime's default Claude model (no explicit override)\n")
+	}
 
 	// Recency tier: always load the last few days of dated (episodic) memory so
 	// recent context is present even when the message doesn't keyword-match. These
@@ -239,11 +247,15 @@ func recentSinceDate(tz string, days int) string {
 
 // agentModel returns the model the agent should run with: its own override, or
 // the user's chat model hint.
-func agentModel(a *store.Agent, s *store.Settings) string {
-	if a != nil && a.Model != "" {
+// agentModel is the model for a run: the agent's own model, or "" for the
+// runtime's default. Models are configured PER AGENT (Agents page, /model, or
+// agent_update) — there is no settings-level model anymore (migration 0029
+// copied any old settings hint into the agents).
+func agentModel(a *store.Agent, _ *store.Settings) string {
+	if a != nil {
 		return a.Model
 	}
-	return modelHint(s.ModelHints, "chat")
+	return ""
 }
 
 // agentRuntimeName returns the runtime the agent should run on: its own override,

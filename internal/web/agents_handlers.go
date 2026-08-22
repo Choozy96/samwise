@@ -24,11 +24,26 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		activeID = active.ID
 	}
 	bots, _ := s.telegramBotViews(r.Context(), u.ID)
+	modelOpts := s.orch.ModelChoices(r.Context())
+	// Agents whose model is a raw id outside the catalog (e.g. set via /model
+	// before the model was cataloged): surface it as a "Custom" option so the
+	// select doesn't silently display "Default".
+	inCatalog := map[string]bool{}
+	for _, m := range modelOpts {
+		inCatalog[m.ID] = true
+	}
+	customModels := map[int64]string{}
+	for _, a := range agents {
+		if a.Model != "" && !inCatalog[a.Model] {
+			customModels[a.ID] = a.Model
+		}
+	}
 	data := pageData{
 		"Title":        "Agents",
 		"Agents":       agents,
 		"ActiveID":     activeID,
-		"ModelOptions": s.orch.ModelChoices(),
+		"ModelOptions": modelOpts,
+		"CustomModels": customModels,
 		"Runtimes":     s.orch.RuntimeChoices(),
 		"TgBots":       bots,
 		"BoxEnabled":   s.box.Enabled(),
@@ -40,6 +55,8 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		data["Flash"], data["FlashKind"] = "Agent deleted.", "ok"
 	case "needname":
 		data["Flash"], data["FlashKind"] = "An agent needs a name.", "error"
+	case "badmodel":
+		data["Flash"], data["FlashKind"] = "Unknown model — pick one from the list, or use a full model id starting with claude-.", "error"
 	case "paired":
 		data["Flash"], data["FlashKind"] = "Telegram paired. Message your bot to start chatting.", "ok"
 	case "badcode":
@@ -77,11 +94,13 @@ func (s *Server) handleAgentSave(w http.ResponseWriter, r *http.Request) {
 		Soul:        r.FormValue("soul"),
 		Enabled:     true,
 	}
-	// Model override: resolve an alias, else accept a raw id, else "" (default).
-	if id, ok := orchestrator.ResolveModel(r.FormValue("model")); ok {
+	// Model override: a catalog alias/id, or a raw "claude-…" id. Anything else
+	// is rejected — storing it would silently break the agent's runs.
+	if id, ok := s.orch.ResolveModelInput(r.Context(), r.FormValue("model")); ok {
 		a.Model = id
 	} else {
-		a.Model = strings.TrimSpace(r.FormValue("model"))
+		http.Redirect(w, r, "/agents?msg=badmodel", http.StatusSeeOther)
+		return
 	}
 	// Runtime override: only a known runtime id, else "" (use the user's runtime).
 	if id, ok := orchestrator.ResolveRuntime(r.FormValue("runtime")); ok {

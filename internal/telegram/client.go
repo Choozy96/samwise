@@ -188,15 +188,26 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text, parseMode 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return err // transport error: AMBIGUOUS — the message may have been delivered
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("telegram sendMessage: status %d: %s", resp.StatusCode, string(b))
+		return &apiError{Status: resp.StatusCode, Desc: string(b)}
 	}
 	return nil
 }
+
+// apiError is a non-200 Bot API response: Telegram received the request and
+// definitively did NOT deliver the message. Distinguishing this from transport
+// errors matters — only a definitive rejection is safe to retry or reformat
+// without risking a duplicate message.
+type apiError struct {
+	Status int
+	Desc   string
+}
+
+func (e *apiError) Error() string { return fmt.Sprintf("telegram: status %d: %s", e.Status, e.Desc) }
 
 // SendDocument uploads a file to a chat as a document (Bot API sendDocument),
 // with an optional caption. Telegram caps bot uploads at 50 MB.

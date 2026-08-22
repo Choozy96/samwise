@@ -65,16 +65,8 @@
             {{end}}
           </select>
         </div>
-        <div>
-          <label for="model">Model</label>
-          <select id="model" name="model">
-            {{range .ModelOptions}}
-            <option value="{{.Alias}}"{{if eq $.CurrentModel .ID}} selected{{end}}>{{.Label}}</option>
-            {{end}}
-          </select>
-        </div>
       </div>
-      <p class="muted" style="margin-top:.5rem">Switching takes effect on your next message — never mid-run. You can also use <code>/runtime</code> and <code>/model</code> in chat. Only Claude — SDK is wired today; channels and Codex are coming.</p>
+      <p class="muted" style="margin-top:.5rem">Switching takes effect on your next message — never mid-run. You can also use <code>/runtime</code> in chat. <strong>Models are set per agent</strong> — on the <a href="/agents">Agents</a> page or with <code>/model</code> in chat (which changes your active agent). Only Claude — SDK is wired today; channels and Codex are coming.</p>
     </div>
 
     <div class="panel">

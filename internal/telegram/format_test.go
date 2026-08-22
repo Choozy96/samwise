@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -139,5 +141,93 @@ func TestMarkdownV2AllSpecialsEscaped(t *testing.T) {
 		if !strings.Contains(got, ch) {
 			t.Errorf("special not escaped (%s) in %q", ch, got)
 		}
+	}
+}
+
+// deliverRecorder simulates the Bot API with scripted responses and records
+// every sendMessage (parse_mode + text) it receives.
+type deliverScript struct {
+	responses []func(w http.ResponseWriter) // consumed in order; extras = 200 OK
+	mu        sync.Mutex
+	got       []struct{ Mode, Text string }
+}
+
+func newDeliverScript(t *testing.T, responses ...func(w http.ResponseWriter)) (*deliverScript, *Client) {
+	t.Helper()
+	ds := &deliverScript{responses: responses}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Text      string `json:"text"`
+			ParseMode string `json:"parse_mode"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		ds.mu.Lock()
+		ds.got = append(ds.got, struct{ Mode, Text string }{body.ParseMode, body.Text})
+		n := len(ds.got)
+		ds.mu.Unlock()
+		if n <= len(ds.responses) {
+			ds.responses[n-1](w)
+			return
+		}
+		io.WriteString(w, `{"ok":true,"result":{}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return ds, &Client{token: "t", baseURL: srv.URL + "/bott", http: srv.Client()}
+}
+
+func (ds *deliverScript) sends() []struct{ Mode, Text string } {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	return append([]struct{ Mode, Text string }{}, ds.got...)
+}
+
+// TestDeliverParseErrorFallsBackPlain: a 400 parse rejection (definitively not
+// delivered) falls back to ONE plain send.
+func TestDeliverParseErrorFallsBackPlain(t *testing.T) {
+	ds, c := newDeliverScript(t, func(w http.ResponseWriter) {
+		w.WriteHeader(400)
+		io.WriteString(w, `{"ok":false,"description":"Bad Request: can't parse entities: byte offset 3"}`)
+	})
+	if err := deliver(context.Background(), c, 1, "hi **there**", FormatMarkdown, nil); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	got := ds.sends()
+	if len(got) != 2 || got[0].Mode != "MarkdownV2" || got[1].Mode != "" {
+		t.Fatalf("want formatted then plain, got %+v", got)
+	}
+}
+
+// TestDeliverTransportErrorNoResend: an ambiguous transport failure (connection
+// dropped mid-request — the message MAY have been delivered) must NOT trigger a
+// plain re-send. This is the doubled-cron-message bug.
+func TestDeliverTransportErrorNoResend(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		hj, _ := w.(http.Hijacker)
+		conn, _, _ := hj.Hijack()
+		conn.Close() // simulate a reset after Telegram may have processed it
+	}))
+	defer srv.Close()
+	c := &Client{token: "t", baseURL: srv.URL + "/bott", http: srv.Client()}
+	if err := deliver(context.Background(), c, 1, "hi **there**", FormatMarkdown, nil); err == nil {
+		t.Fatal("expected an error")
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Fatalf("ambiguous failure must not re-send: %d calls", n)
+	}
+}
+
+// TestDeliverRetries5xxSameMode: a 500 (definitively not delivered) retries the
+// SAME formatted message — never switching to plain.
+func TestDeliverRetries5xxSameMode(t *testing.T) {
+	fail := func(w http.ResponseWriter) { w.WriteHeader(500); io.WriteString(w, `{"ok":false}`) }
+	ds, c := newDeliverScript(t, fail)
+	if err := deliver(context.Background(), c, 1, "hi **there**", FormatMarkdown, nil); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	got := ds.sends()
+	if len(got) != 2 || got[0].Mode != "MarkdownV2" || got[1].Mode != "MarkdownV2" || got[0].Text != got[1].Text {
+		t.Fatalf("want same-mode retry, got %+v", got)
 	}
 }

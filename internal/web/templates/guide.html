@@ -2,4 +2,9 @@
 <div class="panel markdown">
 {{.GuideHTML}}
 </div>
+{{if .AdminGuideHTML}}
+<div class="panel markdown" style="border-color:var(--accent)">
+{{.AdminGuideHTML}}
+</div>
+{{end}}
 {{template "footer" .}}{{end}}

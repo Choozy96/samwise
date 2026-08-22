@@ -46,6 +46,138 @@
 </div>
 
 <div class="panel">
+  <h2>Models</h2>
+  <p class="muted">The model catalog everyone picks from in Settings and with <code>/model</code>. Add a new Claude release here — no redeploy needed. <strong>Alias</strong> is the short name for <code>/model &lt;alias&gt;</code>; <strong>model id</strong> is what's passed to the runtime (blank = the runtime's own default). Disabled models are hidden from users but keep working if already selected.</p>
+  {{if .Models}}
+  <div class="table-wrap"><table class="sortable">
+    <thead><tr><th>Sort</th><th>Label</th><th>Alias</th><th>Model id</th><th>On</th><th data-nosort></th></tr></thead>
+    <tbody>
+    {{range .Models}}
+      <tr>
+        <td class="muted">{{.Sort}}</td>
+        <td>{{.Label}}</td>
+        <td>{{if .Alias}}<code>{{.Alias}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
+        <td>{{if .ModelID}}<code>{{.ModelID}}</code>{{else}}<span class="muted">(default)</span>{{end}}</td>
+        <td>{{if .Enabled}}✅{{else}}<span class="muted">off</span>{{end}}</td>
+        <td>
+          <div style="display:flex; gap:.4rem; align-items:flex-start">
+            <details>
+              <summary class="btn secondary" style="cursor:pointer">Edit</summary>
+              <form method="post" action="/admin/models/save" style="margin-top:.5rem; min-width:240px">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <label>Label</label><input name="label" value="{{.Label}}" required>
+                <label style="margin-top:.3rem">Alias</label><input name="alias" value="{{.Alias}}" placeholder="(optional)">
+                <label style="margin-top:.3rem">Model id</label><input name="model_id" value="{{.ModelID}}" placeholder="(blank = runtime default)">
+                <label style="margin-top:.3rem">Sort</label><input name="sort" type="number" value="{{.Sort}}" style="max-width:6rem">
+                <label style="margin-top:.3rem; display:block"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Enabled</label>
+                <div style="margin-top:.5rem"><button type="submit">Save</button></div>
+              </form>
+            </details>
+            <form method="post" action="/admin/models/delete" onsubmit="return confirm('Remove {{.Label}} from the catalog?')">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button class="secondary">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table></div>
+  {{end}}
+  <details style="margin-top:.75rem">
+    <summary class="btn" style="cursor:pointer; display:inline-block">Add a model</summary>
+    <form method="post" action="/admin/models/save" style="margin-top:.6rem; max-width:26rem">
+      <label for="m_label">Label</label>
+      <input id="m_label" name="label" placeholder="e.g. Claude Opus 5" required>
+      <label for="m_alias" style="margin-top:.4rem">Alias <span class="muted">(for /model)</span></label>
+      <input id="m_alias" name="alias" placeholder="e.g. opus5">
+      <label for="m_id" style="margin-top:.4rem">Model id</label>
+      <input id="m_id" name="model_id" placeholder="e.g. claude-opus-5 (blank = runtime default)">
+      <label for="m_sort" style="margin-top:.4rem">Sort</label>
+      <input id="m_sort" name="sort" type="number" value="50" style="max-width:6rem">
+      <label style="margin-top:.4rem; display:block"><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
+      <div style="margin-top:.6rem"><button type="submit">Add model</button></div>
+    </form>
+  </details>
+</div>
+
+<div class="panel">
+  <h2>Usage &amp; cost</h2>
+  <p class="muted">Token usage and reported cost across <strong>all users</strong>, from the runs log. Quick ranges or a custom UTC date range; group by user, model, or both. Also available in chat with <code>/admin usage</code>.</p>
+  <form method="get" action="/admin" style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:.6rem">
+    <div>
+      <label>Period</label>
+      <div style="display:flex; gap:.25rem">
+        <a class="btn{{if ne .UsagePeriod "1d"}} secondary{{end}}" href="/admin?up=1d&ug={{.UsageGroup}}">1d</a>
+        <a class="btn{{if ne .UsagePeriod "7d"}} secondary{{end}}" href="/admin?up=7d&ug={{.UsageGroup}}">7d</a>
+        <a class="btn{{if ne .UsagePeriod "30d"}} secondary{{end}}" href="/admin?up=30d&ug={{.UsageGroup}}">30d</a>
+      </div>
+    </div>
+    <input type="hidden" name="up" value="custom">
+    <div><label for="ufrom">From (UTC)</label><input id="ufrom" name="ufrom" type="date" value="{{.UsageFrom}}"></div>
+    <div><label for="uto">To (UTC)</label><input id="uto" name="uto" type="date" value="{{.UsageTo}}"></div>
+    <div>
+      <label for="ug">Group by</label>
+      <select id="ug" name="ug">
+        <option value="user"{{if eq .UsageGroup "user"}} selected{{end}}>User</option>
+        <option value="model"{{if eq .UsageGroup "model"}} selected{{end}}>Model</option>
+        <option value="user_model"{{if eq .UsageGroup "user_model"}} selected{{end}}>User × model</option>
+        <option value=""{{if eq .UsageGroup ""}} selected{{end}}>Total only</option>
+      </select>
+    </div>
+    <button type="submit">Apply</button>
+  </form>
+  {{if .Usage}}
+  <div class="table-wrap"><table class="sortable">
+    <thead><tr>
+      {{if or (eq .UsageGroup "user") (eq .UsageGroup "user_model")}}<th>User</th>{{end}}
+      {{if or (eq .UsageGroup "model") (eq .UsageGroup "user_model")}}<th>Model</th>{{end}}
+      <th>Runs</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th><th>Cost (USD)</th>
+    </tr></thead>
+    <tbody>
+    {{range .Usage}}
+      <tr>
+        {{if or (eq $.UsageGroup "user") (eq $.UsageGroup "user_model")}}<td>{{if .Username}}{{.Username}}{{else}}<span class="muted">#{{.UserID}}</span>{{end}}</td>{{end}}
+        {{if or (eq $.UsageGroup "model") (eq $.UsageGroup "user_model")}}<td>{{if .Model}}<code>{{.Model}}</code>{{else}}<span class="muted">(default)</span>{{end}}</td>{{end}}
+        <td data-sort="{{.Runs}}">{{.Runs}}</td>
+        <td data-sort="{{.InputTokens}}">{{tokens .InputTokens}}</td>
+        <td data-sort="{{.OutputTokens}}">{{tokens .OutputTokens}}</td>
+        <td data-sort="{{.CacheWrite}}">{{tokens .CacheWrite}}</td>
+        <td data-sort="{{.CacheRead}}">{{tokens .CacheRead}}</td>
+        <td data-sort="{{.CostUSD}}">${{printf "%.4f" .CostUSD}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+    <tfoot><tr style="font-weight:600; border-top:2px solid var(--border)">
+      {{if or (eq .UsageGroup "user") (eq .UsageGroup "user_model")}}<td>Total</td>{{end}}
+      {{if or (eq .UsageGroup "model") (eq .UsageGroup "user_model")}}<td>{{if eq .UsageGroup "model"}}Total{{end}}</td>{{end}}
+      <td>{{.UsageTotal.Runs}}</td>
+      <td>{{tokens .UsageTotal.InputTokens}}</td>
+      <td>{{tokens .UsageTotal.OutputTokens}}</td>
+      <td>{{tokens .UsageTotal.CacheWrite}}</td>
+      <td>{{tokens .UsageTotal.CacheRead}}</td>
+      <td>${{printf "%.4f" .UsageTotal.CostUSD}}</td>
+    </tr></tfoot>
+  </table></div>
+  <p class="muted" style="font-size:.8rem; margin-top:.4rem">Cost is the runtime-reported figure per run (indicative under a subscription — you pay the flat rate, not per token).</p>
+  {{else}}
+  <p class="muted">No runs in this period.</p>
+  {{end}}
+</div>
+
+<div class="panel">
+  <h2>Anchor chat</h2>
+  <p class="muted">A designated <strong>announcement chat</strong> for the whole deployment. When set, scheduled results (cron output) land here <strong>by default</strong> — a job's own delivery destination, or a user's specific default chat, still wins. Pick one of the chats you're paired to (add the bot to a group and pair it first).</p>
+  <form method="post" action="/admin/anchor" style="max-width:26rem">
+    <select name="anchor">
+      <option value=""{{if eq .AnchorChat ""}} selected{{end}}>None — use each user's own delivery settings</option>
+      {{range .AnchorTargets}}<option value="{{.Value}}"{{if eq $.AnchorChat .Value}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <div style="margin-top:.6rem"><button type="submit">Save</button></div>
+  </form>
+</div>
+
+<div class="panel">
   <h2>System health</h2>
   <table>
     <tr><th>Database</th><td>{{.Health.DB}}</td></tr>

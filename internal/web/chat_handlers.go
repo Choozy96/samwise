@@ -37,12 +37,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		if rt == "" {
 			rt = st.ActiveRuntime
 		}
-		model := agent.Model
-		if model == "" {
-			model = orchestrator.ModelHintFor(st.ModelHints, "chat")
-		}
+		// Models are per agent; "" = the runtime's default.
 		data["RuntimeLabel"] = orchestrator.RuntimeLabel(rt)
-		data["ModelLabel"] = orchestrator.ModelLabel(model)
+		data["ModelLabel"] = s.orch.ModelLabel(r.Context(), agent.Model)
 		data["RuntimeAvailable"] = s.orch.IsRuntimeAvailable(rt)
 	}
 	s.render(w, r, "chat", data)
