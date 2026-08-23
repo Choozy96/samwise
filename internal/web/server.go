@@ -80,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /memory/scope", s.requireAuth(s.handleMemoryScope))
 	mux.HandleFunc("GET /files", s.requireAuth(s.handleFiles))
 	mux.HandleFunc("GET /files/view", s.requireAuth(s.handleFileView))
+	mux.HandleFunc("GET /files/download", s.requireAuth(s.handleFileDownload))
 	mux.HandleFunc("POST /files/save", s.requireAuth(s.handleFileSave))
 	mux.HandleFunc("POST /files/upload", s.requireAuth(s.handleFileUpload))
 	mux.HandleFunc("POST /files/mkdir", s.requireAuth(s.handleFileMkdir))

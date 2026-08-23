@@ -86,7 +86,9 @@ volume — **your data persists across restarts and rebuilds** (only
 3. Build and start:
 
    ```sh
-   docker compose up --build -d
+   make up            # = docker compose up -d --build, with the version stamped
+   #   (plain `docker compose up --build -d` also works; it just records the
+   #    version as "docker" instead of the git tag)
    docker compose logs -f
    curl localhost:8080/healthz      # {"status":"ok"}
    ```
@@ -223,11 +225,16 @@ The full image reference is `<registry>/samwise:<tag>`.
 is e.g. `latest`. So the reference is `<dockerhub-user>/samwise:latest`:
 
 ```sh
-# Local / CI — log in once, then build + push:
+# Local / CI — log in once, then build + push. `make push` stamps the version
+# from `git describe` (so the web footer + the agent report the right release):
 docker login                                              # Docker Hub user + access token
-docker build -t <dockerhub-user>/samwise:latest .
-docker push <dockerhub-user>/samwise:latest
-# e.g.  docker build -t janedoe/samwise:latest .
+make push IMAGE=<dockerhub-user>/samwise:latest
+# e.g.  make push IMAGE=janedoe/samwise:latest
+#
+# Without make (or to stamp manually), pass VERSION yourself — otherwise the
+# build records "docker" as the version:
+#   docker build --build-arg VERSION=$(git describe --tags --always --dirty) \
+#     -t <dockerhub-user>/samwise:latest . && docker push <dockerhub-user>/samwise:latest
 
 # On the VPS — set IMAGE in .env to the SAME reference, then:
 #   IMAGE=<dockerhub-user>/samwise:latest
@@ -245,8 +252,7 @@ docker compose up -d --no-build
 gcloud artifacts repositories create <repo> --repository-format=docker --location=<region>
 gcloud auth configure-docker <region>-docker.pkg.dev
 
-docker build -t <region>-docker.pkg.dev/<project-id>/<repo>/samwise:latest .
-docker push  <region>-docker.pkg.dev/<project-id>/<repo>/samwise:latest
+make push IMAGE=<region>-docker.pkg.dev/<project-id>/<repo>/samwise:latest
 ```
 
 On the VPS, set `IMAGE` to the same reference; the instance's service account
