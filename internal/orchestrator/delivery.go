@@ -6,7 +6,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,51 +17,76 @@ import (
 // 50 MB; stay under it.
 const maxSendFileBytes = 45 << 20
 
-// ChannelSender delivers a message to a user over an external channel
-// (Telegram). The web channel is delivered in-process by appending to the
-// conversation, so it needs no sender.
+// ChannelSender delivers a message to a user over an external channel. The web
+// channel is delivered in-process by appending to the conversation, so it needs
+// no sender. One implementation per channel, registered with RegisterSender.
 //
-// With multiple Telegram bots, delivery must pick the right bot: Send uses the
-// user's primary bot, SendAgent prefers the bot bound to a given agent (falling
-// back to primary), and SendBot targets one specific bot (e.g. a pairing
-// confirmation on the bot the user just messaged).
+// With multiple bots, delivery must pick the right one: Send uses the user's
+// primary bot, SendAgent prefers the bot bound to a given agent (falling back
+// to primary), and SendBot targets one specific bot (e.g. a pairing
+// confirmation on the bot the user just messaged). ChatID is a string because
+// not every channel uses numeric chat ids.
 type ChannelSender interface {
 	Send(ctx context.Context, userID int64, text string) error
 	SendAgent(ctx context.Context, userID, agentID int64, text string) error
 	SendBot(ctx context.Context, userID, botID int64, text string) error
 	// SendToChat delivers to an explicit bot+chat (a specific paired chat chosen
 	// as a job's delivery destination).
-	SendToChat(ctx context.Context, userID, botID, chatID int64, text string) error
+	SendToChat(ctx context.Context, userID, botID int64, chatID, text string) error
 	// SendFile / SendFileToChat upload a document (a file the agent produced) to
 	// the user's primary-bot chat, or to an explicit bot+chat.
 	SendFile(ctx context.Context, userID int64, name string, data []byte, caption string) error
-	SendFileToChat(ctx context.Context, userID, botID, chatID int64, name string, data []byte, caption string) error
+	SendFileToChat(ctx context.Context, userID, botID int64, chatID, name string, data []byte, caption string) error
+}
+
+// RegisterSender wires a channel's delivery sink ("telegram", "slack", …).
+// Call during boot wiring, before serving.
+func (o *Orchestrator) RegisterSender(channel string, s ChannelSender) {
+	if o.senders == nil {
+		o.senders = map[string]ChannelSender{}
+	}
+	o.senders[channel] = s
+}
+
+// sender returns the sink for a channel, nil if none is registered.
+func (o *Orchestrator) sender(channel string) ChannelSender { return o.senders[channel] }
+
+// deliverToAddress sends text to one specific chat. Fails when the address's
+// channel has no registered sender.
+func (o *Orchestrator) deliverToAddress(ctx context.Context, userID int64, addr Address, text string) error {
+	s := o.sender(addr.Channel)
+	if s == nil {
+		return fmt.Errorf("no %s sender registered", addr.Channel)
+	}
+	return s.SendToChat(ctx, userID, addr.BotID, addr.ChatID, text)
 }
 
 // SetTelegramSender wires the Telegram delivery sink (MVP step 6). Until set,
 // telegram-targeted delivery falls back to web.
-func (o *Orchestrator) SetTelegramSender(s ChannelSender) { o.telegram = s }
+func (o *Orchestrator) SetTelegramSender(s ChannelSender) { o.RegisterSender("telegram", s) }
 
 // TelegramConfigured reports whether Telegram delivery is available.
-func (o *Orchestrator) TelegramConfigured() bool { return o.telegram != nil }
+func (o *Orchestrator) TelegramConfigured() bool { return o.sender("telegram") != nil }
 
 // NotifyTelegram sends a one-off Telegram message to a user (e.g. an alert) via
 // their primary bot, independent of their preferred delivery channel. No-op if
 // Telegram is not configured.
 func (o *Orchestrator) NotifyTelegram(ctx context.Context, userID int64, text string) error {
-	if o.telegram == nil {
+	s := o.sender("telegram")
+	if s == nil {
 		return nil
 	}
-	return o.telegram.Send(ctx, userID, text)
+	return s.Send(ctx, userID, text)
 }
 
 // NotifyTelegramBot sends a one-off message via a specific bot (e.g. the pairing
 // confirmation on the bot the user just linked). botID 0 = the legacy bot.
 func (o *Orchestrator) NotifyTelegramBot(ctx context.Context, userID, botID int64, text string) error {
-	if o.telegram == nil {
+	s := o.sender("telegram")
+	if s == nil {
 		return nil
 	}
-	return o.telegram.SendBot(ctx, userID, botID, text)
+	return s.SendBot(ctx, userID, botID, text)
 }
 
 // DeliverToUser delivers text to the user's default delivery channel:
@@ -74,33 +98,32 @@ func (o *Orchestrator) DeliverToUser(ctx context.Context, userID int64, text str
 	if err != nil {
 		return err
 	}
-	if strings.HasPrefix(s.DeliveryChannel, "tg:") && o.telegram != nil {
-		if botID, chatID, ok := parseTGDelivery(s.DeliveryChannel); ok {
-			if err := o.telegram.SendToChat(ctx, userID, botID, chatID, text); err == nil {
-				return nil
-			}
-			o.log.Warn("default-chat delivery failed; delivering to web", "user_id", userID, "target", s.DeliveryChannel)
+	if addr, ok := ParseAddress(s.DeliveryChannel); ok {
+		if err := o.deliverToAddress(ctx, userID, addr, text); err == nil {
+			return nil
 		}
+		o.log.Warn("default-chat delivery failed; delivering to web", "user_id", userID, "target", s.DeliveryChannel)
 	}
-	if s.DeliveryChannel == "telegram" && o.telegram != nil {
-		err := o.telegram.Send(ctx, userID, text)
+	if snd := o.sender(s.DeliveryChannel); snd != nil { // coarse channel pref, e.g. "telegram"
+		err := snd.Send(ctx, userID, text)
 		if err == nil {
 			return nil
 		}
 		// No paired/running bot (or a transient send failure): fall through to web
 		// so a reminder is never silently dropped.
-		o.log.Warn("telegram delivery failed; delivering to web", "user_id", userID, "err", err)
+		o.log.Warn("channel delivery failed; delivering to web", "channel", s.DeliveryChannel, "user_id", userID, "err", err)
 	}
 	return o.deliverToWeb(ctx, userID, text)
 }
 
 // SendWorkspaceFile reads a file from the user's workspace and delivers it to
-// the run's origin chat, the user's default channel, or the web portal — as a
-// Telegram document, or (on web) a note pointing to the downloadable file. rel
-// is workspace-relative and guarded (no traversal; the internal .claude dir is
-// off-limits). Used by the send_file tool so the agent can hand the user a CSV /
-// xlsx / markdown / text file it produced.
-func (o *Orchestrator) SendWorkspaceFile(ctx context.Context, userID, botID, chatID int64, rel, caption string) error {
+// the run's origin chat (an Address string, "" when the run came from the web),
+// the user's default channel, or the web portal — as a channel document, or (on
+// web) a note pointing to the downloadable file. rel is workspace-relative and
+// guarded (no traversal; the internal .claude dir is off-limits). Used by the
+// send_file tool so the agent can hand the user a CSV / xlsx / markdown / text
+// file it produced.
+func (o *Orchestrator) SendWorkspaceFile(ctx context.Context, userID int64, origin, rel, caption string) error {
 	abs, name, ok := o.resolveWorkspaceFile(userID, rel)
 	if !ok {
 		return fmt.Errorf("path not allowed: %q", rel)
@@ -117,21 +140,30 @@ func (o *Orchestrator) SendWorkspaceFile(ctx context.Context, userID, botID, cha
 		return err
 	}
 
-	// Origin telegram chat wins; else the user's default channel; else web.
-	if chatID != 0 && o.telegram != nil {
-		return o.telegram.SendFileToChat(ctx, userID, botID, chatID, name, data, caption)
+	sendTo := func(addr Address) (bool, error) {
+		s := o.sender(addr.Channel)
+		if s == nil {
+			return false, nil
+		}
+		return true, s.SendFileToChat(ctx, userID, addr.BotID, addr.ChatID, name, data, caption)
+	}
+	// The run's origin chat wins; else the user's default channel; else web.
+	if addr, ok := ParseAddress(origin); ok {
+		if sent, err := sendTo(addr); sent {
+			return err
+		}
 	}
 	s, err := o.db.GetSettings(ctx, userID)
 	if err != nil {
 		return err
 	}
-	if strings.HasPrefix(s.DeliveryChannel, "tg:") && o.telegram != nil {
-		if b, c, ok := parseTGDelivery(s.DeliveryChannel); ok {
-			return o.telegram.SendFileToChat(ctx, userID, b, c, name, data, caption)
+	if addr, ok := ParseAddress(s.DeliveryChannel); ok {
+		if sent, err := sendTo(addr); sent {
+			return err
 		}
 	}
-	if s.DeliveryChannel == "telegram" && o.telegram != nil {
-		return o.telegram.SendFile(ctx, userID, name, data, caption)
+	if snd := o.sender(s.DeliveryChannel); snd != nil {
+		return snd.SendFile(ctx, userID, name, data, caption)
 	}
 	// Web: the file is in the workspace; point the user at it (downloadable from
 	// the Files page). A relative link keeps it clickable behind any proxy path.
@@ -194,58 +226,39 @@ func (o *Orchestrator) deliverToWeb(ctx context.Context, userID int64, text stri
 // Telegram it routes to the bot bound to the run's agent (agentName ""/unknown
 // => the user's primary bot).
 func (o *Orchestrator) DeliverRunResult(ctx context.Context, userID int64, agentName, delivery, text string) error {
-	switch {
-	case strings.HasPrefix(delivery, "tg:"):
+	if addr, ok := ParseAddress(delivery); ok {
 		// A specific paired chat chosen for this job.
-		if botID, chatID, ok := parseTGDelivery(delivery); ok && o.telegram != nil {
-			return o.telegram.SendToChat(ctx, userID, botID, chatID, text)
+		if err := o.deliverToAddress(ctx, userID, addr, text); err != nil {
+			return o.postToWebChat(ctx, userID, agentName, text) // fallback if unavailable
 		}
-		return o.postToWebChat(ctx, userID, agentName, text) // fallback if unavailable
-	case delivery == "web":
-		return o.postToWebChat(ctx, userID, agentName, text)
-	default:
-		// "" → precedence: the user's SPECIFIC default chat (a deliberate routing
-		// choice) > the admin's anchor announcement chat, if set > the user's
-		// coarse channel preference (telegram/web).
-		s, err := o.db.GetSettings(ctx, userID)
-		if err != nil {
-			return err
-		}
-		if strings.HasPrefix(s.DeliveryChannel, "tg:") && o.telegram != nil {
-			if botID, chatID, ok := parseTGDelivery(s.DeliveryChannel); ok {
-				return o.telegram.SendToChat(ctx, userID, botID, chatID, text)
-			}
-		}
-		if anchor := o.AnchorChat(ctx); anchor != "" && o.telegram != nil {
-			if botID, chatID, ok := parseTGDelivery(anchor); ok {
-				if err := o.telegram.SendToChat(ctx, userID, botID, chatID, text); err == nil {
-					return nil
-				}
-				o.log.Warn("anchor delivery failed; falling back to user default", "user_id", userID)
-			}
-		}
-		if s.DeliveryChannel == "telegram" && o.telegram != nil {
-			if agentID := o.agentIDForName(ctx, userID, agentName); agentID != 0 {
-				return o.telegram.SendAgent(ctx, userID, agentID, text)
-			}
-			return o.telegram.Send(ctx, userID, text)
-		}
+		return nil
+	}
+	if delivery == "web" {
 		return o.postToWebChat(ctx, userID, agentName, text)
 	}
-}
-
-// parseTGDelivery parses "tg:<botID>:<chatID>".
-func parseTGDelivery(s string) (botID, chatID int64, ok bool) {
-	parts := strings.Split(s, ":")
-	if len(parts) != 3 || parts[0] != "tg" {
-		return 0, 0, false
+	// "" → precedence: the user's SPECIFIC default chat (a deliberate routing
+	// choice) > the admin's anchor announcement chat, if set > the user's
+	// coarse channel preference (telegram/web).
+	s, err := o.db.GetSettings(ctx, userID)
+	if err != nil {
+		return err
 	}
-	b, e1 := strconv.ParseInt(parts[1], 10, 64)
-	c, e2 := strconv.ParseInt(parts[2], 10, 64)
-	if e1 != nil || e2 != nil {
-		return 0, 0, false
+	if addr, ok := ParseAddress(s.DeliveryChannel); ok && o.sender(addr.Channel) != nil {
+		return o.deliverToAddress(ctx, userID, addr, text)
 	}
-	return b, c, true
+	if addr, ok := ParseAddress(o.AnchorChat(ctx)); ok {
+		if err := o.deliverToAddress(ctx, userID, addr, text); err == nil {
+			return nil
+		}
+		o.log.Warn("anchor delivery failed; falling back to user default", "user_id", userID)
+	}
+	if snd := o.sender(s.DeliveryChannel); snd != nil {
+		if agentID := o.agentIDForName(ctx, userID, agentName); agentID != 0 {
+			return snd.SendAgent(ctx, userID, agentID, text)
+		}
+		return snd.Send(ctx, userID, text)
+	}
+	return o.postToWebChat(ctx, userID, agentName, text)
 }
 
 // postToWebChat delivers a scheduled-job result into the user's interactive web
@@ -408,20 +421,17 @@ func (o *Orchestrator) SaveDailyDistillation(ctx context.Context, userID int64, 
 // specific paired chat (falling back to the default channel so a note is never
 // silently dropped).
 func (o *Orchestrator) deliverToTarget(ctx context.Context, userID int64, target, text string) error {
-	switch {
-	case strings.HasPrefix(target, "tg:"):
-		if botID, chatID, ok := parseTGDelivery(target); ok && o.telegram != nil {
-			if err := o.telegram.SendToChat(ctx, userID, botID, chatID, text); err == nil {
-				return nil
-			}
-			o.log.Warn("target delivery failed; falling back to default channel", "user_id", userID, "target", target)
+	if addr, ok := ParseAddress(target); ok {
+		if err := o.deliverToAddress(ctx, userID, addr, text); err == nil {
+			return nil
 		}
-		return o.DeliverToUser(ctx, userID, text)
-	case target == "web":
-		return o.deliverToWeb(ctx, userID, text)
-	default:
+		o.log.Warn("target delivery failed; falling back to default channel", "user_id", userID, "target", target)
 		return o.DeliverToUser(ctx, userID, text)
 	}
+	if target == "web" {
+		return o.deliverToWeb(ctx, userID, text)
+	}
+	return o.DeliverToUser(ctx, userID, text)
 }
 
 // localDayRangeUTC returns the [start, end) UTC timestamps ('YYYY-MM-DD HH:MM:SS')

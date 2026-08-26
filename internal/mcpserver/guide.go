@@ -22,7 +22,7 @@ type readGuideIn struct {
 
 func (h *handlers) registerGuide(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "read_guide",
+		Name:        "read_guide",
 		Description: "Read your own user guide — the authoritative reference for what you (this assistant) can do and how each feature works: memory, scheduled jobs, reminders, skills, Telegram and group chats, settings, secrets. Call with no argument to list the sections, then call again with a section name to read it. Use this to answer 'how do I…' / 'can you…' questions and to operate features correctly instead of guessing.",
 	}, h.readGuide)
 }

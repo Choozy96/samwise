@@ -215,8 +215,8 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		Attachments:      atts,
 		StoreUserMessage: true,
 		ReadOnly:         readOnly,
-		OriginBotID:      b.botID,
-		OriginChatID:     msg.Chat.ID,
+		Origin: orchestrator.Address{Channel: "telegram", BotID: b.botID,
+			ChatID: strconv.FormatInt(msg.Chat.ID, 10)},
 	}, nil)
 	stopTyping()
 	if err != nil {

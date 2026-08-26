@@ -35,7 +35,7 @@ func TestResolveWorkspaceFile(t *testing.T) {
 // rather than delivering.
 func TestSendWorkspaceFileMissing(t *testing.T) {
 	o := &Orchestrator{cfg: &config.Config{DBPath: filepath.Join(t.TempDir(), "app.db")}}
-	if err := o.SendWorkspaceFile(nil, 7, 0, 0, "nope.txt", ""); err == nil {
+	if err := o.SendWorkspaceFile(nil, 7, "", "nope.txt", ""); err == nil {
 		t.Fatal("expected an error for a missing file")
 	}
 	// A file that IS too large is rejected before any send attempt.

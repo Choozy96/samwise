@@ -29,26 +29,21 @@ type Config struct {
 	AgentID int64
 }
 
-// NewServer builds an in-process core MCP server bound to a single run context
-// (userID/runID) over the orchestrator's already-open DB. The user id is fixed
-// here by the trusted caller — never taken from agent input — so a run can only
-// ever touch its own user's data. This is how the orchestrator hosts the core
-// tools itself (token-scoped HTTP) instead of spawning a per-run child that
-// would run under the agent's uid with direct DB access.
 // Binding is the per-run context a core server is bound to.
 type Binding struct {
 	UserID, RunID, AgentID int64
 	ReadOnly               bool
-	// OriginBotID/OriginChatID are the Telegram bot+chat the run came from (0 =
-	// web/none), so job_create can resolve a "here" delivery destination.
-	OriginBotID, OriginChatID int64
+	// Origin is the chat address the run came from, in the stored Address form
+	// (e.g. "tg:1:-100200"); "" for web/none. Lets job_create and send_file
+	// resolve a "here"/origin destination without knowing the channel.
+	Origin string
 }
 
 func NewServer(db *store.DB, b Binding) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "core", Version: "0.1.0"}, nil)
 	(&handlers{
 		db: db, userID: b.UserID, runID: b.RunID, agentID: b.AgentID, readOnly: b.ReadOnly,
-		originBotID: b.OriginBotID, originChatID: b.OriginChatID,
+		origin: b.Origin,
 	}).register(srv)
 	return srv
 }
@@ -68,13 +63,12 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 type handlers struct {
-	db           *store.DB
-	userID       int64
-	runID        int64
-	agentID      int64 // the running agent; agent-scoped memory is tagged with it
-	readOnly     bool  // write tools refuse when set (unregistered group sender)
-	originBotID  int64 // telegram bot+chat the run came from (0 = web/none), for
-	originChatID int64 // resolving a job's "here" delivery destination
+	db       *store.DB
+	userID   int64
+	runID    int64
+	agentID  int64  // the running agent; agent-scoped memory is tagged with it
+	readOnly bool   // write tools refuse when set (unregistered group sender)
+	origin   string // chat address the run came from ("" = web/none), stored Address form
 }
 
 // denyWrite refuses a write tool for a read-only run with a clear, relayable

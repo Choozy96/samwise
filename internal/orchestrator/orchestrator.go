@@ -58,18 +58,18 @@ var coreTools = []string{
 
 // Orchestrator dispatches runs through the active runtime and persists results.
 type Orchestrator struct {
-	cfg      *config.Config
-	db       *store.DB
-	log      *slog.Logger
-	box      *secretbox.Box
-	runtimes map[string]runtime.AgentRuntime
-	fallback runtime.AgentRuntime
-	exePath  string        // this binary (retained for out-of-process tooling)
-	dbAbs    string        // absolute DB path (retained for out-of-process tooling)
-	mcp       *mcpHost      // in-process, token-scoped core MCP server
-	isolate   bool          // run each agent as a per-user uid (resolved in Start)
-	claudeDir string        // the shared claude config dir (source of the credential)
-	telegram  ChannelSender // optional Telegram delivery sink (MVP step 6)
+	cfg       *config.Config
+	db        *store.DB
+	log       *slog.Logger
+	box       *secretbox.Box
+	runtimes  map[string]runtime.AgentRuntime
+	fallback  runtime.AgentRuntime
+	exePath   string                   // this binary (retained for out-of-process tooling)
+	dbAbs     string                   // absolute DB path (retained for out-of-process tooling)
+	mcp       *mcpHost                 // in-process, token-scoped core MCP server
+	isolate   bool                     // run each agent as a per-user uid (resolved in Start)
+	claudeDir string                   // the shared claude config dir (source of the credential)
+	senders   map[string]ChannelSender // per-channel delivery sinks (RegisterSender)
 	// credMu serializes writes to the one shared claude.ai credential file. Every
 	// user's run links to the same canonical .credentials.json, so concurrent runs
 	// reconciling a refreshed token would otherwise tear that file (truncate +
@@ -179,10 +179,10 @@ type DispatchRequest struct {
 	// unregistered senders in a group (they can chat/read but not mutate the
 	// owner's memory, jobs, or workspace).
 	ReadOnly bool
-	// OriginBotID/OriginChatID identify the Telegram bot+chat this turn came from
-	// (0 for web), so a job created this turn can target "here" for delivery.
-	OriginBotID  int64
-	OriginChatID int64
+	// Origin identifies the chat this turn came from (zero for web), so a job
+	// created this turn can target "here" for delivery, and send_file can hand a
+	// file back to the same chat — on any channel.
+	Origin Address
 }
 
 // Dispatch runs one turn end-to-end: persist the user message, assemble context,
@@ -255,7 +255,7 @@ func (o *Orchestrator) Dispatch(ctx context.Context, req DispatchRequest, onEven
 
 	mcpScope := runScope{
 		userID: req.User.ID, runID: runID, agentID: agent.ID, readOnly: req.ReadOnly,
-		originBotID: req.OriginBotID, originChatID: req.OriginChatID,
+		origin: req.Origin.String(),
 	}
 	mcpJSON, allowedTools, releaseMCP := o.buildMCP(ctx, mcpScope)
 	defer releaseMCP()

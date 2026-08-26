@@ -22,12 +22,11 @@ import (
 // whether the run may write and the Telegram chat it came from (for "deliver
 // here").
 type runScope struct {
-	userID       int64
-	runID        int64
-	agentID      int64
-	readOnly     bool
-	originBotID  int64
-	originChatID int64
+	userID   int64
+	runID    int64
+	agentID  int64
+	readOnly bool
+	origin   string // stored Address form; "" = web/none
 }
 
 // mcpHost serves the core MCP server in-process over a loopback HTTP endpoint,
@@ -92,7 +91,7 @@ func (h *mcpHost) getServer(req *http.Request) *mcp.Server {
 	}
 	return mcpserver.NewServer(h.db, mcpserver.Binding{
 		UserID: scope.userID, RunID: scope.runID, AgentID: scope.agentID,
-		ReadOnly: scope.readOnly, OriginBotID: scope.originBotID, OriginChatID: scope.originChatID,
+		ReadOnly: scope.readOnly, Origin: scope.origin,
 	})
 }
 
