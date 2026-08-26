@@ -398,6 +398,38 @@ device sessions, some don't — check), use a **separate account dedicated to th
 server**. Copying a credential up from a logged-in machine still works as a quick
 fix, but only if that machine won't be used with Claude afterward.
 
+#### Expect to re-authenticate periodically (suspected ~30-day session limit)
+
+Even a correctly set-up, server-dedicated login **eventually expires** and has to
+be re-created with `/login`. The tell-tale error is:
+
+```
+Failed to authenticate: OAuth session expired and could not be refreshed
+```
+
+**Suspicion (unconfirmed):** the OAuth session / refresh token has a hard
+lifetime of roughly **30 days**, independent of how often it's used. Evidence so
+far is a single interval:
+
+| Date | Event |
+|---|---|
+| 2026-06-23 | VPS re-authenticated with its own `/login` |
+| 2026-07-23 | All runs failed with `OAuth session expired and could not be refreshed` |
+
+That's ~30 days of otherwise-healthy operation, with no config change and no
+credential sharing — which is why a fixed session lifetime is the leading theory
+rather than the rotation/sharing problem. **It is not confirmed.** If this recurs,
+note the date here: a second ~30-day gap would confirm a fixed limit, while a
+markedly different interval would point at something else (revocation, a login
+elsewhere, or an account-level change).
+
+**Don't confuse the two auth failures** — they have different causes and fixes:
+
+| Error | Meaning | Fix |
+|---|---|---|
+| `OAuth session expired and could not be refreshed` | The refresh token itself is dead — session reached end of life | Re-run `/login` (above), then restart |
+| `401 Invalid authentication credentials` | The token was rotated out from under this machine — usually a credential **shared** with another active machine | Give the server its **own** login; stop sharing |
+
 ### Credentials dir ownership (`EACCES … /home/app/.claude`) — self-healed
 
 The container runs as the non-root user **`app` (uid 10001)**, and `claude` writes

@@ -165,6 +165,14 @@ func (o *Orchestrator) resolveWorkspaceFile(userID int64, rel string) (abs, name
 	return abs, filepath.Base(abs), true
 }
 
+// AnchorChat returns the admin-designated announcement chat ("tg:<bot>:<chat>"),
+// or "" when none is set. Scheduled results land here by default unless a job
+// or the user configured a specific destination.
+func (o *Orchestrator) AnchorChat(ctx context.Context) string {
+	v, _ := o.db.GetSystemSetting(ctx, store.AnchorChatKey)
+	return v
+}
+
 // deliverToWeb appends text to the active agent's web conversation so it shows
 // in the portal chat.
 func (o *Orchestrator) deliverToWeb(ctx context.Context, userID int64, text string) error {
@@ -196,7 +204,9 @@ func (o *Orchestrator) DeliverRunResult(ctx context.Context, userID int64, agent
 	case delivery == "web":
 		return o.postToWebChat(ctx, userID, agentName, text)
 	default:
-		// "" → the user's default delivery channel (which may itself be a chat).
+		// "" → precedence: the user's SPECIFIC default chat (a deliberate routing
+		// choice) > the admin's anchor announcement chat, if set > the user's
+		// coarse channel preference (telegram/web).
 		s, err := o.db.GetSettings(ctx, userID)
 		if err != nil {
 			return err
@@ -204,6 +214,14 @@ func (o *Orchestrator) DeliverRunResult(ctx context.Context, userID int64, agent
 		if strings.HasPrefix(s.DeliveryChannel, "tg:") && o.telegram != nil {
 			if botID, chatID, ok := parseTGDelivery(s.DeliveryChannel); ok {
 				return o.telegram.SendToChat(ctx, userID, botID, chatID, text)
+			}
+		}
+		if anchor := o.AnchorChat(ctx); anchor != "" && o.telegram != nil {
+			if botID, chatID, ok := parseTGDelivery(anchor); ok {
+				if err := o.telegram.SendToChat(ctx, userID, botID, chatID, text); err == nil {
+					return nil
+				}
+				o.log.Warn("anchor delivery failed; falling back to user default", "user_id", userID)
 			}
 		}
 		if s.DeliveryChannel == "telegram" && o.telegram != nil {

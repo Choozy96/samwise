@@ -102,8 +102,6 @@ func (s *Server) settingsData(r *http.Request, st *store.Settings) pageData {
 		"Title":         "Settings",
 		"S":             st,
 		"Runtimes":      s.orch.RuntimeChoices(),
-		"ModelOptions":  s.orch.ModelChoices(),
-		"CurrentModel":  orchestrator.ModelHintFor(st.ModelHints, "chat"),
 		"AgentToolsOn":  s.cfg.AllowAgentTools,
 		"OptionalTools": runtime.OptionalTools,
 		"EnabledTools":  enabled,
@@ -150,12 +148,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if id, ok := orchestrator.ResolveRuntime(r.FormValue("active_runtime")); ok && (s.orch.IsRuntimeAvailable(id) || id == st.ActiveRuntime) {
 		st.ActiveRuntime = id
 	}
-	// Model: resolve an alias from the dropdown, or accept a raw model id.
-	if modelID, ok := orchestrator.ResolveModel(r.FormValue("model")); ok {
-		st.ModelHints = orchestrator.SetChatModel(st.ModelHints, modelID)
-	} else if raw := strings.TrimSpace(r.FormValue("model")); raw != "" {
-		st.ModelHints = orchestrator.SetChatModel(st.ModelHints, raw)
-	}
+	// Models are per agent (Agents page / /model) — no settings-level model.
 	st.DeliveryChannel = s.sanitizeDefaultDelivery(r, u.ID, r.FormValue("delivery_channel"), st.DeliveryChannel)
 	st.TgFormat = pick(r.FormValue("tg_format"), []string{"markdown", "html", "plain"}, st.TgFormat)
 	st.DistillationTime = normalizeHHMM(r.FormValue("distillation_time"), st.DistillationTime)

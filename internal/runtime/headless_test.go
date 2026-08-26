@@ -94,3 +94,43 @@ func TestHeadlessCapturesErrorResult(t *testing.T) {
 		t.Error("an EventError should have been emitted")
 	}
 }
+
+// TestInitReportsMCPFailures: an init event with a failed MCP server logs an
+// error (observability for the occasional attach failures) and doesn't disturb
+// the rest of init parsing.
+func TestInitReportsMCPFailures(t *testing.T) {
+	line := `{"type":"system","subtype":"init","session_id":"s1","model":"m",` +
+		`"mcp_servers":[{"name":"core","status":"connected"},{"name":"notion","status":"failed"}]}`
+	var ev streamLine
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		t.Fatal(err)
+	}
+	var buf strings.Builder
+	c := &ClaudeHeadless{log: slog.New(slog.NewTextHandler(&buf, nil))}
+	res := &Result{}
+	c.handleEvent(ev, res, &strings.Builder{}, func(Event) {})
+	if res.SessionID != "s1" {
+		t.Errorf("session = %q", res.SessionID)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "notion") || !strings.Contains(out, "failed") {
+		t.Errorf("failed server not logged: %s", out)
+	}
+	if strings.Contains(out, `server=core`) {
+		t.Errorf("connected server should not be logged as failure: %s", out)
+	}
+}
+
+// TestAgentEnvMCPTimeouts: default MCP timeouts are injected unless overridden.
+func TestAgentEnvMCPTimeouts(t *testing.T) {
+	env := agentEnv(nil)
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "MCP_TIMEOUT=60000") || !strings.Contains(joined, "MCP_TOOL_TIMEOUT=120000") {
+		t.Errorf("default MCP timeouts missing:\n%s", joined)
+	}
+	env = agentEnv(map[string]string{"MCP_TIMEOUT": "5000"})
+	joined = strings.Join(env, "\n")
+	if !strings.Contains(joined, "MCP_TIMEOUT=5000") || strings.Contains(joined, "MCP_TIMEOUT=60000") {
+		t.Errorf("user override not respected:\n%s", joined)
+	}
+}

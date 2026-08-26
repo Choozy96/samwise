@@ -73,9 +73,13 @@ func (h *handlers) agentCreate(ctx context.Context, _ *mcp.CallToolRequest, in a
 	if ex, err := h.db.GetAgentByName(ctx, h.userID, name); err == nil && ex != nil {
 		return h.fail("agent_create", name, "you already have an agent with that name — use agent_update to change it"), nil, nil
 	}
+	model, merr := resolveModelArg(ctx, in.Model)
+	if merr != "" {
+		return h.fail("agent_create", name, merr), nil, nil
+	}
 	id, err := h.db.CreateAgent(ctx, store.Agent{
 		UserID: h.userID, Name: name, Description: strings.TrimSpace(in.Description), Soul: soul,
-		Model: strings.TrimSpace(in.Model), Runtime: strings.TrimSpace(in.Runtime), Enabled: true,
+		Model: model, Runtime: strings.TrimSpace(in.Runtime), Enabled: true,
 	})
 	if err != nil {
 		return h.fail("agent_create", name, err.Error()), nil, nil
@@ -149,7 +153,15 @@ func (h *handlers) agentUpdate(ctx context.Context, _ *mcp.CallToolRequest, in a
 		a.Soul = s
 	}
 	if s := strings.TrimSpace(in.Model); s != "" {
-		a.Model = clearable(s)
+		if s == "-" {
+			a.Model = ""
+		} else {
+			model, merr := resolveModelArg(ctx, s)
+			if merr != "" {
+				return h.fail("agent_update", name, merr), nil, nil
+			}
+			a.Model = model
+		}
 	}
 	if s := strings.TrimSpace(in.Runtime); s != "" {
 		a.Runtime = clearable(s)

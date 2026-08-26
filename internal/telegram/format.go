@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -318,6 +319,28 @@ func renderMD(b *strings.Builder, n ast.Node, src []byte) {
 // deliver chunks rawText and sends each piece in the user's format. markdown =>
 // MarkdownV2, html => HTML; if Telegram rejects the formatted markup it resends
 // that chunk as plain text so the message always gets through.
+// isParseError reports a 400 where Telegram rejected the message's MARKUP —
+// the one case where re-sending the same text as plain is correct and cannot
+// duplicate (the formatted send was definitively not delivered).
+func isParseError(err error) bool {
+	var ae *apiError
+	if !errors.As(err, &ae) || ae.Status != 400 {
+		return false
+	}
+	d := strings.ToLower(ae.Desc)
+	return strings.Contains(d, "parse") || strings.Contains(d, "entit")
+}
+
+// isRetryable reports an error where Telegram definitively did not deliver the
+// message AND a retry can help: rate limiting or a server-side failure.
+// Ambiguous transport errors (timeouts, connection resets) are NOT retryable —
+// the message may have been delivered, and re-sending shows the user a
+// duplicate. (That blind re-send was the cause of doubled cron messages.)
+func isRetryable(err error) bool {
+	var ae *apiError
+	return errors.As(err, &ae) && (ae.Status == 429 || ae.Status >= 500)
+}
+
 func deliver(ctx context.Context, c *Client, chatID int64, rawText, format string, log *slog.Logger) error {
 	size := tgMaxLen
 	if format != FormatPlain {
@@ -331,14 +354,29 @@ func deliver(ctx context.Context, c *Client, chatID int64, rawText, format strin
 			rendered, mode = markdownToMarkdownV2(raw), "MarkdownV2"
 		}
 		if mode != "" {
-			if err := c.SendMessage(ctx, chatID, rendered, mode); err == nil {
+			err := c.SendMessage(ctx, chatID, rendered, mode)
+			if err == nil {
 				continue
-			} else if log != nil {
-				log.Warn("telegram: formatted send failed, sending plain", "mode", mode, "err", err)
+			}
+			if !isParseError(err) {
+				// The markup wasn't the problem — do NOT switch to a plain
+				// re-send. Retry the SAME message only on a definitive
+				// rejection; an ambiguous transport error returns as-is.
+				if isRetryable(err) {
+					if rerr := sendRetryMode(ctx, c, chatID, rendered, mode); rerr == nil {
+						continue
+					} else {
+						return rerr
+					}
+				}
+				return err
+			}
+			if log != nil {
+				log.Warn("telegram: markup rejected, sending plain", "mode", mode, "err", err)
 			}
 		}
 		// Plain fallback: the raw markdown text, no parse_mode.
-		if err := sendRetry(ctx, c, chatID, raw); err != nil {
+		if err := sendRetryMode(ctx, c, chatID, raw, ""); err != nil {
 			return err
 		}
 	}
@@ -346,11 +384,18 @@ func deliver(ctx context.Context, c *Client, chatID int64, rawText, format strin
 }
 
 // sendRetry sends a plain chunk, retrying transient failures.
-func sendRetry(ctx context.Context, c *Client, chatID int64, text string) error {
+// sendRetryMode sends with up to two retries — but ONLY while each failure is a
+// definitive Telegram rejection worth retrying (429/5xx). The first ambiguous
+// transport error stops the loop: the message may already be in the chat, and
+// another send would duplicate it.
+func sendRetryMode(ctx context.Context, c *Client, chatID int64, text, mode string) error {
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
-		if err = c.SendMessage(ctx, chatID, text, ""); err == nil {
+		if err = c.SendMessage(ctx, chatID, text, mode); err == nil {
 			return nil
+		}
+		if !isRetryable(err) {
+			return err
 		}
 		select {
 		case <-ctx.Done():

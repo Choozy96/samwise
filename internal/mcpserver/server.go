@@ -151,6 +151,7 @@ func (h *handlers) register(s *mcp.Server) {
 	h.registerSelfConfig(s)
 	h.registerAudience(s)
 	h.registerFiles(s)
+	h.registerUsage(s)
 }
 
 // ── handlers ─────────────────────────────────────────────────────────────────

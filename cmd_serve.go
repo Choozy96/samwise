@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -39,6 +40,17 @@ func runServe(_ []string) error {
 	orch := orchestrator.New(d.cfg, d.db, d.log, d.box, headless)
 	mcpserver.SetSkillExecutor(orch.RunSkill)       // sandboxed skill_run
 	mcpserver.SetFileSender(orch.SendWorkspaceFile) // send_file delivery
+	// Model-input validation for the agent tools: catalog policy + suggestions.
+	mcpserver.SetModelResolver(func(ctx context.Context, input string) (string, bool, []string) {
+		if id, ok := orch.ResolveModelInput(ctx, input); ok {
+			return id, true, nil
+		}
+		var sugg []string
+		for _, m := range orch.SuggestModels(ctx, input, 3) {
+			sugg = append(sugg, fmt.Sprintf("%s (%s)", m.Alias, m.Label))
+		}
+		return "", false, sugg
+	})
 	// Bring up the in-process, token-scoped core MCP host before serving. Fail
 	// loudly if its loopback listener can't bind — a run with no core host gets
 	// no memory/job tools, and we never want to silently fall back to spawning

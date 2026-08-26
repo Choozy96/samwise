@@ -121,6 +121,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/users/create", s.requireAdmin(s.handleAdminCreateUser))
 	mux.HandleFunc("POST /admin/users/toggle", s.requireAdmin(s.handleAdminToggleUser))
 	mux.HandleFunc("POST /admin/users/password", s.requireAdmin(s.handleAdminResetPassword))
+	mux.HandleFunc("POST /admin/models/save", s.requireAdmin(s.handleAdminModelSave))
+	mux.HandleFunc("POST /admin/models/delete", s.requireAdmin(s.handleAdminModelDelete))
+	mux.HandleFunc("POST /admin/anchor", s.requireAdmin(s.handleAdminAnchor))
 
 	return mux
 }

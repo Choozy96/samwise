@@ -53,6 +53,7 @@ var coreTools = []string{
 	"mcp__core__set_skill_audience",
 	"mcp__core__set_tool_audience",
 	"mcp__core__send_file",
+	"mcp__core__usage_report",
 }
 
 // Orchestrator dispatches runs through the active runtime and persists results.

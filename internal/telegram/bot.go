@@ -190,6 +190,12 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	// Download any attached file(s) into the user's workspace so the agent's
 	// tools can read them.
 	atts := b.downloadAttachments(ctx, user.ID, msg)
+	// Media referenced by reply: "@bot summarize this" on a message carrying a
+	// document/photo should attach THAT file too — replyContext below only
+	// carries the parent's text, not its media.
+	if msg.ReplyToMessage != nil {
+		atts = append(atts, b.downloadAttachments(ctx, user.ID, msg.ReplyToMessage)...)
+	}
 
 	// When this message replies to another (the common "tag the bot in a reply
 	// chain" case), the user's text alone is contextless — the agent can't see

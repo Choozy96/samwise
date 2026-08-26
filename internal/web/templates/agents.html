@@ -32,7 +32,9 @@
           <div>
             <label>Model</label>
             <select name="model">
+              <option value=""{{if eq $ag.Model ""}} selected{{end}}>Default (runtime's model)</option>
               {{range $.ModelOptions}}<option value="{{.Alias}}"{{if eq $ag.Model .ID}} selected{{end}}>{{.Label}}</option>{{end}}
+              {{with index $.CustomModels $ag.ID}}<option value="{{.}}" selected>Custom: {{.}}</option>{{end}}
             </select>
           </div>
           <div>
@@ -61,7 +63,7 @@
     <div class="row">
       <div>
         <label for="na_model">Model</label>
-        <select id="na_model" name="model">{{range .ModelOptions}}<option value="{{.Alias}}">{{.Label}}</option>{{end}}</select>
+        <select id="na_model" name="model"><option value="">Default (runtime's model)</option>{{range .ModelOptions}}<option value="{{.Alias}}">{{.Label}}</option>{{end}}</select>
       </div>
       <div>
         <label for="na_runtime">Runtime</label>
