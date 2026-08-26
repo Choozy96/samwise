@@ -194,7 +194,12 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	// document/photo should attach THAT file too — replyContext below only
 	// carries the parent's text, not its media.
 	if msg.ReplyToMessage != nil {
-		atts = append(atts, b.downloadAttachments(ctx, user.ID, msg.ReplyToMessage)...)
+		replyAtts := b.downloadAttachments(ctx, user.ID, msg.ReplyToMessage)
+		if len(replyAtts) > 0 {
+			b.log.Info("telegram: attached media from replied-to message",
+				"user_id", user.ID, "files", len(replyAtts))
+		}
+		atts = append(atts, replyAtts...)
 	}
 
 	// When this message replies to another (the common "tag the bot in a reply
@@ -241,40 +246,7 @@ func (b *Bot) userFormat(ctx context.Context, userID int64) string {
 // saves it to the user's workspace as an orchestrator attachment. Best-effort:
 // a file that's too large or fails to download is skipped (logged), not fatal.
 func (b *Bot) downloadAttachments(ctx context.Context, userID int64, msg *Message) []orchestrator.Attachment {
-	type ref struct {
-		fileID string
-		name   string
-		size   int64
-	}
-	var refs []ref
-	switch {
-	case msg.Document != nil:
-		refs = append(refs, ref{msg.Document.FileID, msg.Document.FileName, msg.Document.FileSize})
-	case len(msg.Photo) > 0:
-		// Telegram sends ascending sizes; the last is the highest resolution.
-		p := msg.Photo[len(msg.Photo)-1]
-		refs = append(refs, ref{p.FileID, "photo.jpg", p.FileSize})
-	case msg.Video != nil:
-		refs = append(refs, ref{msg.Video.FileID, mediaName(msg.Video.FileName, "video.mp4"), msg.Video.FileSize})
-	case msg.Animation != nil:
-		refs = append(refs, ref{msg.Animation.FileID, mediaName(msg.Animation.FileName, "animation.mp4"), msg.Animation.FileSize})
-	case msg.VideoNote != nil:
-		refs = append(refs, ref{msg.VideoNote.FileID, "video-note.mp4", msg.VideoNote.FileSize})
-	case msg.Voice != nil:
-		refs = append(refs, ref{msg.Voice.FileID, "voice.ogg", msg.Voice.FileSize})
-	case msg.Audio != nil:
-		refs = append(refs, ref{msg.Audio.FileID, mediaName(msg.Audio.FileName, "audio.mp3"), msg.Audio.FileSize})
-	case msg.Sticker != nil:
-		// Static stickers are .webp (the agent can view them as an image);
-		// animated/video stickers aren't viewable but degrade gracefully.
-		name := "sticker.webp"
-		if msg.Sticker.IsVideo {
-			name = "sticker.webm"
-		} else if msg.Sticker.IsAnimated {
-			name = "sticker.tgs"
-		}
-		refs = append(refs, ref{msg.Sticker.FileID, name, msg.Sticker.FileSize})
-	}
+	refs := mediaRefs(msg)
 
 	var out []orchestrator.Attachment
 	for _, r := range refs {
@@ -302,6 +274,52 @@ func (b *Bot) downloadAttachments(ctx context.Context, userID int64, msg *Messag
 		_ = b.db.AddAuditEvent(ctx, userID, 0, "message", "attachment", att.Name, "ok")
 	}
 	return out
+}
+
+// mediaRef is one downloadable media item on a message.
+type mediaRef struct {
+	fileID string
+	name   string
+	size   int64
+}
+
+// mediaRefs extracts the downloadable media reference from a message — pure, so
+// the reply-media path (extracting from msg.ReplyToMessage) is testable against
+// real Telegram payloads.
+func mediaRefs(msg *Message) []mediaRef {
+	if msg == nil {
+		return nil
+	}
+	var refs []mediaRef
+	switch {
+	case msg.Document != nil:
+		refs = append(refs, mediaRef{msg.Document.FileID, msg.Document.FileName, msg.Document.FileSize})
+	case len(msg.Photo) > 0:
+		// Telegram sends ascending sizes; the last is the highest resolution.
+		p := msg.Photo[len(msg.Photo)-1]
+		refs = append(refs, mediaRef{p.FileID, "photo.jpg", p.FileSize})
+	case msg.Video != nil:
+		refs = append(refs, mediaRef{msg.Video.FileID, mediaName(msg.Video.FileName, "video.mp4"), msg.Video.FileSize})
+	case msg.Animation != nil:
+		refs = append(refs, mediaRef{msg.Animation.FileID, mediaName(msg.Animation.FileName, "animation.mp4"), msg.Animation.FileSize})
+	case msg.VideoNote != nil:
+		refs = append(refs, mediaRef{msg.VideoNote.FileID, "video-note.mp4", msg.VideoNote.FileSize})
+	case msg.Voice != nil:
+		refs = append(refs, mediaRef{msg.Voice.FileID, "voice.ogg", msg.Voice.FileSize})
+	case msg.Audio != nil:
+		refs = append(refs, mediaRef{msg.Audio.FileID, mediaName(msg.Audio.FileName, "audio.mp3"), msg.Audio.FileSize})
+	case msg.Sticker != nil:
+		// Static stickers are .webp (the agent can view them as an image);
+		// animated/video stickers aren't viewable but degrade gracefully.
+		name := "sticker.webp"
+		if msg.Sticker.IsVideo {
+			name = "sticker.webm"
+		} else if msg.Sticker.IsAnimated {
+			name = "sticker.tgs"
+		}
+		refs = append(refs, mediaRef{msg.Sticker.FileID, name, msg.Sticker.FileSize})
+	}
+	return refs
 }
 
 // mediaName returns name if Telegram supplied one, else a sensible default (some

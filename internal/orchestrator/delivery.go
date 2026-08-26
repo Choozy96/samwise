@@ -79,14 +79,21 @@ func (o *Orchestrator) NotifyTelegram(ctx context.Context, userID int64, text st
 	return s.Send(ctx, userID, text)
 }
 
-// NotifyTelegramBot sends a one-off message via a specific bot (e.g. the pairing
-// confirmation on the bot the user just linked). botID 0 = the legacy bot.
-func (o *Orchestrator) NotifyTelegramBot(ctx context.Context, userID, botID int64, text string) error {
-	s := o.sender("telegram")
+// NotifyBot sends a one-off message via a specific bot on a specific channel
+// (e.g. the pairing confirmation on the bot the user just linked). No-op if the
+// channel has no sender.
+func (o *Orchestrator) NotifyBot(ctx context.Context, channel string, userID, botID int64, text string) error {
+	s := o.sender(channel)
 	if s == nil {
 		return nil
 	}
 	return s.SendBot(ctx, userID, botID, text)
+}
+
+// NotifyTelegramBot sends a one-off message via a specific Telegram bot.
+// botID 0 = the legacy bot.
+func (o *Orchestrator) NotifyTelegramBot(ctx context.Context, userID, botID int64, text string) error {
+	return o.NotifyBot(ctx, "telegram", userID, botID, text)
 }
 
 // DeliverToUser delivers text to the user's default delivery channel:

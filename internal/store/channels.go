@@ -41,6 +41,20 @@ func (db *DB) GetIdentityByExternal(ctx context.Context, channel string, botID i
 // (i.e. has a DM identity, whose external_id is the user's positive Telegram id;
 // group identities use the negative chat id and never match). Used to gate write
 // operations in group chats to registered users.
+// UserPairedOnChannel reports whether an external account id (e.g. a Slack U…
+// id) is paired on the given channel — the generic form of TelegramUserIsPaired,
+// used for group/channel write-gating.
+func (db *DB) UserPairedOnChannel(ctx context.Context, channel, externalID string) (bool, error) {
+	var exists int
+	err := db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM channel_identities WHERE channel = ? AND external_id = ?)`,
+		channel, externalID).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists == 1, nil
+}
+
 func (db *DB) TelegramUserIsPaired(ctx context.Context, telegramID int64) (bool, error) {
 	var exists int
 	err := db.QueryRowContext(ctx,

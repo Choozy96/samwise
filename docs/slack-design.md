@@ -1,5 +1,9 @@
 # Slack channel support — pre-build review & design (v0.4.0)
 
+> **Status: implemented** (v0.4.0-dev on `main` — seam refactor shipped as
+> v0.3.8, Slack adapter in the Slack P1–P4 commits; Discord followed the same
+> seam). Kept as the design record.
+
 Decisions locked: use `github.com/slack-go/slack` (Socket Mode); **channels
 (group chats) are in the first cut**. This doc is (1) a review of every place
 the codebase currently assumes Telegram, (2) the seam refactor to do BEFORE the

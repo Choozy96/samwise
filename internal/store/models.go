@@ -17,21 +17,21 @@ type User struct {
 
 // Settings holds a user's per-user preferences.
 type Settings struct {
-	UserID            int64
-	Timezone          string // IANA name
-	ActiveRuntime     string // claude-headless | claude-channels | codex-exec
-	DeliveryChannel   string // web | telegram
-	ModelHints        string // JSON map of job-type -> model
-	BriefingTime      string // local HH:MM
-	RestartTime       string // local HH:MM
-	DistillationTime  string // local HH:MM
-	TranscriptWindowN int
-	RetrievalK        int
+	UserID              int64
+	Timezone            string // IANA name
+	ActiveRuntime       string // claude-headless | claude-channels | codex-exec
+	DeliveryChannel     string // web | telegram
+	ModelHints          string // JSON map of job-type -> model
+	BriefingTime        string // local HH:MM
+	RestartTime         string // local HH:MM
+	DistillationTime    string // local HH:MM
+	TranscriptWindowN   int
+	RetrievalK          int
 	TgFormat            string // markdown | html | plain (how Telegram messages are formatted)
 	DistillNotify       bool   // send a message after end-of-day distillation (opt-in; default false)
 	DistillNotifyTarget string // where that note goes: '' = default channel | web | tg:<botID>:<chatID>
 	DistillTZ           string // zone anchoring the distillation day/schedule: '' = user tz, else fixed IANA
-	GroupReplyMode    string // mention | all — when the bot replies in a group (default mention)
-	ExtraTools        string // comma-separated opt-in built-in tool names beyond the scoped set
-	ToolAudience      string // JSON map of built-in tool name -> 'everyone' (overrides; unset = code default)
+	GroupReplyMode      string // mention | all — when the bot replies in a group (default mention)
+	ExtraTools          string // comma-separated opt-in built-in tool names beyond the scoped set
+	ToolAudience        string // JSON map of built-in tool name -> 'everyone' (overrides; unset = code default)
 }

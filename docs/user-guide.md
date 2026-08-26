@@ -190,6 +190,110 @@ If Telegram ever rejects the formatted markup, the message is automatically
 resent as plain text so it always arrives. Switchable any time; the web chat is
 unaffected.
 
+## Slack
+
+Chat with your assistant from Slack too — same memory, same agents, same rules
+as Telegram. Slack connects over **Socket Mode**, so your server needs no public
+URL for it.
+
+### 1. Create the Slack app
+
+In [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From a
+manifest**, pick your workspace, and paste:
+
+```yaml
+display_information:
+  name: Samwise
+features:
+  bot_user:
+    display_name: samwise
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - groups:history
+      - im:history
+      - chat:write
+      - files:read
+      - files:write
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+  interactivity:
+    is_enabled: false
+  socket_mode_enabled: true
+```
+
+Then: **Install to Workspace**, and collect two tokens:
+
+- **Bot token** (`xoxb-…`) — *OAuth & Permissions → Bot User OAuth Token*.
+- **App-level token** (`xapp-…`) — *Basic Information → App-Level Tokens →
+  Generate*, with the `connections:write` scope (this is the Socket Mode
+  connection token).
+
+### 2. Add it to Samwise and pair
+
+On the **Agents** page → **Slack apps** → *Add a Slack app*: paste both tokens,
+optionally **bind it to an agent** (like Telegram bots). Then **DM the app in
+Slack** — it replies with a 6-character pairing code; enter it under *Pair a
+chat*. For a **channel**: invite the app (`/invite @samwise`), @mention it, and
+pair the code it posts — the whole channel is then paired (shared context, like
+Telegram groups).
+
+### How it behaves
+
+- **DMs**: just message the app.
+- **Channels**: it responds when **@mentioned**, and replies **in a thread** to
+  keep the channel tidy. Switch Settings → group reply mode to *all* to have it
+  respond to every message.
+- **Files** work both ways: upload to the app and the assistant can read them;
+  ask for an export and it uploads the file back. Replying **in a thread** under
+  a message that carries a file and mentioning the app lets the assistant see
+  THAT file — e.g. reply to a PDF post with "@samwise summarize this".
+- **Write-gating**: in a channel, members whose own Slack account isn't paired
+  can chat read-only — same rule as Telegram groups. Slash commands work too.
+- **Delivery**: paired Slack chats appear in every delivery dropdown (default
+  destination, per-job delivery, distillation note, anchor chat) alongside
+  Telegram ones.
+
+## Discord
+
+Discord works the same way — Gateway connection (no public URL), same memory,
+agents, pairing, and gating.
+
+### 1. Create the bot
+
+In the [Discord developer portal](https://discord.com/developers/applications):
+**New Application** → open **Bot** → copy the **token** (Reset Token if hidden),
+and — important — enable the **Message Content Intent** on the same page (the
+bot can't read messages without it). Then invite it to your server: **OAuth2 →
+URL Generator**, scopes `bot`, permissions *View Channels*, *Send Messages*,
+*Attach Files*, *Read Message History* — open the generated URL.
+
+### 2. Add it to Samwise and pair
+
+**Agents** page → **Discord bots** → *Add a Discord bot*: paste the token (just
+one — Discord needs no second token), optionally bind an agent. **DM the bot on
+Discord** for a pairing code, or @mention it in a server channel to pair that
+channel (shared context).
+
+### How it behaves
+
+DMs answer directly; server channels respond when **@mentioned**, when you
+**reply to one of the bot's messages**, or to everything with group reply mode
+*all*. **Replying** to a message that carries an attachment and tagging the bot
+lets the assistant see that attachment — e.g. reply to a file post with
+"@samwise summarize this". Unpaired members in a channel are
+read-only, commands work, files upload/download both ways, and paired Discord
+chats appear in all delivery dropdowns. Discord renders the assistant's
+formatting natively.
+
 ## Memory
 
 The assistant keeps long-term memory about you and surfaces what's relevant to
@@ -402,8 +506,8 @@ to expect:
 
 - **More access methods** — **Claude — channels** and **ChatGPT — Codex** runtimes
   (only **Claude — SDK** runs today).
-- **Helper scripts & per-user sandboxes** — isolated per-user containers so skills
-  can run heavier scripts safely.
+- **Per-user containers** — a stronger sandbox for skill scripts (today they run
+  under per-user OS-uid isolation, which already works — containers deepen it).
 - **Multi-agent v2** — per-agent skills/MCP tools and optional per-agent memory
   (today agents share your skills, tools, and memory).
 - **Bundled extension content** — ready-made Calendar / Todoist / Notion setups

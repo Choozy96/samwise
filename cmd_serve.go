@@ -10,10 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	"samwise/internal/discord"
 	"samwise/internal/mcpserver"
 	"samwise/internal/orchestrator"
 	"samwise/internal/runtime"
 	"samwise/internal/scheduler"
+	"samwise/internal/slack"
 	"samwise/internal/telegram"
 	"samwise/internal/web"
 )
@@ -77,6 +79,16 @@ func runServe(_ []string) error {
 	mgr := telegram.NewManager(d.db, orch, d.box, d.log, d.cfg.TelegramBotToken)
 	orch.SetTelegramSender(mgr)
 	go mgr.Run(ctx)
+	// Slack channel: one Socket Mode connection per registered app (no public
+	// webhook needed). Registered apps live in the DB; nothing runs until one is
+	// added on the Agents page.
+	slackMgr := slack.NewManager(d.db, orch, d.box, d.log)
+	orch.RegisterSender("slack", slackMgr)
+	go slackMgr.Run(ctx)
+	// Discord channel: one Gateway session per registered bot (same model).
+	discordMgr := discord.NewManager(d.db, orch, d.box, d.log)
+	orch.RegisterSender("discord", discordMgr)
+	go discordMgr.Run(ctx)
 	if d.cfg.TelegramBotToken == "" {
 		d.log.Info("telegram: no legacy TELEGRAM_BOT_TOKEN; only per-user bots will run")
 	}

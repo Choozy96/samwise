@@ -5,23 +5,27 @@
 Every data-access method is scoped to a `user_id` taken from the authenticated
 session or the paired channel identity — never from model/agent input. A user
 cannot read or modify another user's memory, conversations, jobs, agents,
-skills, secrets, or settings. The core MCP server is spawned per run bound to a
-single `--user-id`, so the agent's tools operate only on that user's data.
+skills, secrets, or settings. The core MCP server runs in-process in the
+orchestrator; each run authenticates to it with a per-run bearer token that
+resolves to a single user server-side, so the agent's tools operate only on
+that user's data (details two sections down).
 
 This is covered by tests, e.g. `TestCrossUserIsolation`,
 `TestSearchMemoryUserScopedFTS`, and `TestMemorySearchUserScoped`.
 
 ## Group chats: write operations are gated to registered users
 
-A Telegram group is paired to one **owner**, and the agent acts as that owner
-(their memory, jobs, tools). Anyone in the group can chat/read, but a message
-only gets **write** access — the core MCP write tools (`memory_save`,
-`job_*`, `reminder_set/cancel`, `set_timezone`) and write-capable built-in
-tools (`Bash`/`Write`/`Edit`) — when the **sender's own Telegram account is
+A group chat — a Telegram group, Slack channel, or Discord guild channel — is
+paired to one **owner**, and the agent acts as that owner (their memory, jobs,
+tools). Anyone in the group can chat/read, but a message only gets **write**
+access — the core MCP write tools (`memory_save`, `job_*`,
+`reminder_set/cancel`, `set_timezone`) and write-capable built-in tools
+(`Bash`/`Write`/`Edit`) — when the **sender's own account on that channel is
 registered** (DM-paired) with the assistant. An unregistered member's run is
 read-only, so a stranger can't mutate the owner's data or run commands as them
-(`TestTelegramUserIsPaired`). The owner must DM-pair their own Telegram id to
-write in their own group.
+(the check is channel-generic — `UserPairedOnChannel`;
+`TestTelegramUserIsPaired`). The owner must DM-pair their own channel identity
+to write in their own group.
 
 The core MCP server runs **inside the trusted orchestrator**, not as a child of
 the agent. The agent reaches it over a loopback HTTP endpoint, and which user a

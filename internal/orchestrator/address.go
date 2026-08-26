@@ -46,6 +46,8 @@ func ParseAddress(s string) (Address, bool) {
 		channel = "telegram"
 	case "slack":
 		channel = "slack"
+	case "discord":
+		channel = "discord"
 	default:
 		return Address{}, false
 	}
@@ -58,4 +60,4 @@ func ParseAddress(s string) (Address, bool) {
 
 // KnownChannels lists the external channels this build supports; the web layer
 // iterates it when listing paired chats. Append new channels here.
-var KnownChannels = []string{"telegram"}
+var KnownChannels = []string{"telegram", "slack", "discord"}

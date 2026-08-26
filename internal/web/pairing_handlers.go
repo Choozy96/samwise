@@ -35,9 +35,9 @@ func (s *Server) handlePairingSubmit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	s.log.Info("telegram paired", "user_id", u.ID, "external_id", pc.ExternalID, "bot_id", pc.BotID)
-	_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", "telegram_paired", "linked telegram sender "+pc.ExternalID, "ok")
+	s.log.Info("chat paired", "channel", pc.Channel, "user_id", u.ID, "external_id", pc.ExternalID, "bot_id", pc.BotID)
+	_ = s.db.AddAuditEvent(r.Context(), u.ID, 0, "auth", pc.Channel+"_paired", "linked "+pc.Channel+" sender "+pc.ExternalID, "ok")
 	// Best-effort confirmation back to the chat, via the bot the user just paired.
-	_ = s.orch.NotifyTelegramBot(r.Context(), u.ID, pc.BotID, "✅ Paired! You're connected as "+u.Username+". How can I help?")
+	_ = s.orch.NotifyBot(r.Context(), pc.Channel, u.ID, pc.BotID, "✅ Paired! You're connected as "+u.Username+". How can I help?")
 	http.Redirect(w, r, "/agents?msg=paired", http.StatusSeeOther)
 }

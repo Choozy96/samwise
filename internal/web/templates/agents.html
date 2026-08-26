@@ -159,8 +159,165 @@
 </div>
 
 <div class="panel">
-  <h2>Pair a Telegram chat</h2>
-  <p class="muted">Each bot is paired separately. Open the bot in Telegram (tap its @handle above), send it any message, and it replies with a 6-character code (valid 15 minutes) — the code knows which bot it's for. Enter it here.</p>
+  <h2>Slack apps</h2>
+  <p class="muted">Connect agents to <strong>Slack</strong> (Socket Mode — no public URL needed). Create a Slack app for your workspace (see the <a href="/guide">Guide</a> for the manifest), install it, then paste its <strong>bot token</strong> (xoxb-…) and <strong>app-level token</strong> (xapp-…, with the <code>connections:write</code> scope). Each app can be <strong>bound to an agent</strong>. Tokens are encrypted at rest and never shown.{{if not .BoxEnabled}} <strong>Set MASTER_KEY in your env file to store tokens.</strong>{{end}}</p>
+
+  {{if .SlackBots}}
+  <table style="margin-top:.5rem">
+    <tr><th>Label</th><th>Workspace</th><th>Agent</th><th>Status</th><th></th></tr>
+    {{range .SlackBots}}
+    <tr>
+      <td><strong>{{.Label}}</strong></td>
+      <td class="muted">{{if .TeamName}}{{.TeamName}}{{else}}<span title="resolves shortly after adding">…</span>{{end}}</td>
+      <td class="muted">{{if .AgentName}}{{.AgentName}}{{else}}<span class="muted">active agent</span>{{end}}</td>
+      <td>
+        {{if .Enabled}}<span class="pill">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}
+        {{if .Pairings}}
+        <div style="margin-top:.35rem">
+          {{range .Pairings}}
+          <div style="display:flex; align-items:center; gap:.4rem; margin:.15rem 0">
+            <span class="pill">paired</span><span class="muted" style="font-size:.8rem">chat {{.ExternalID}}</span>
+            <form method="post" action="/agents/slack/unpair" onsubmit="return confirm('Unpair this chat?')" style="display:inline">
+              <input type="hidden" name="bot_id" value="{{.BotID}}">
+              <input type="hidden" name="external_id" value="{{.ExternalID}}">
+              <button class="secondary" style="padding:.15rem .55rem; font-size:.75rem">Unpair</button>
+            </form>
+          </div>
+          {{end}}
+        </div>
+        {{else}}<span class="pill">unpaired</span>{{end}}
+      </td>
+      <td>
+        <details style="display:inline-block; vertical-align:top; margin-left:.4rem">
+          <summary class="secondary" style="cursor:pointer; display:inline-block">Edit</summary>
+          {{$botAgent := .AgentID}}
+          <form method="post" action="/agents/slack/update" style="margin-top:.5rem">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <label>Label</label>
+            <input name="label" value="{{.Label}}" required>
+            <label style="margin-top:.5rem">Bound agent</label>
+            <select name="agent_id">
+              <option value="0"{{if eq $botAgent 0}} selected{{end}}>Active agent (unbound)</option>
+              {{range $.Agents}}<option value="{{.ID}}"{{if eq .ID $botAgent}} selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+            <label style="margin-top:.5rem"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Enabled</label>
+            <label style="margin-top:.5rem">Replace tokens <span class="muted">(both together; leave blank to keep)</span></label>
+            <input name="bot_token" type="password" autocomplete="off" placeholder="xoxb-…">
+            <input name="app_token" type="password" autocomplete="off" placeholder="xapp-…" style="margin-top:.3rem">
+            <div style="margin-top:.5rem"><button type="submit">Save</button></div>
+          </form>
+          <form method="post" action="/agents/slack/delete" onsubmit="return confirm('Delete this app? Its pairings are removed.')" style="margin-top:.5rem">
+            <input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button>
+          </form>
+        </details>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}<p class="muted">No Slack apps yet. Add one below.</p>{{end}}
+
+  {{if .BoxEnabled}}
+  <details style="margin-top:.75rem">
+    <summary><strong>Add a Slack app</strong></summary>
+    <form method="post" action="/agents/slack/add" style="margin-top:.75rem">
+      <label for="s_label">Label</label>
+      <input id="s_label" name="label" placeholder="Team workspace" autocomplete="off" required>
+      <label for="s_bot" style="margin-top:.5rem">Bot token <span class="muted">(OAuth &amp; Permissions → Bot User OAuth Token)</span></label>
+      <input id="s_bot" name="bot_token" type="password" autocomplete="off" placeholder="xoxb-…" required>
+      <label for="s_app" style="margin-top:.5rem">App-level token <span class="muted">(Basic Information → App-Level Tokens, scope connections:write)</span></label>
+      <input id="s_app" name="app_token" type="password" autocomplete="off" placeholder="xapp-…" required>
+      <label for="s_agent" style="margin-top:.5rem">Bind to agent</label>
+      <select id="s_agent" name="agent_id">
+        <option value="0">Active agent (unbound — follows /agent)</option>
+        {{range .Agents}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      <p class="muted" style="margin-top:.5rem">The bot token is validated with Slack and both tokens are stored encrypted. After adding, DM the app in Slack to get a pairing code.</p>
+      <div style="margin-top:.75rem"><button type="submit">Add app</button></div>
+    </form>
+  </details>
+  {{end}}
+</div>
+
+<div class="panel">
+  <h2>Discord bots</h2>
+  <p class="muted">Connect agents to <strong>Discord</strong> (Gateway — no public URL needed). Create an application in the <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">developer portal</a>, add a <strong>Bot</strong>, enable the <strong>Message Content intent</strong>, copy the bot token, and invite the bot to your server (see the <a href="/guide">Guide</a>). One token only. Each bot can be <strong>bound to an agent</strong>. Tokens are encrypted at rest and never shown.{{if not .BoxEnabled}} <strong>Set MASTER_KEY in your env file to store tokens.</strong>{{end}}</p>
+
+  {{if .DiscordBots}}
+  <table style="margin-top:.5rem">
+    <tr><th>Label</th><th>Bot</th><th>Agent</th><th>Status</th><th></th></tr>
+    {{range .DiscordBots}}
+    <tr>
+      <td><strong>{{.Label}}</strong></td>
+      <td class="muted">{{if .Username}}@{{.Username}}{{else}}<span title="resolves shortly after adding">…</span>{{end}}</td>
+      <td class="muted">{{if .AgentName}}{{.AgentName}}{{else}}<span class="muted">active agent</span>{{end}}</td>
+      <td>
+        {{if .Enabled}}<span class="pill">enabled</span>{{else}}<span class="pill">disabled</span>{{end}}
+        {{if .Pairings}}
+        <div style="margin-top:.35rem">
+          {{range .Pairings}}
+          <div style="display:flex; align-items:center; gap:.4rem; margin:.15rem 0">
+            <span class="pill">paired</span><span class="muted" style="font-size:.8rem">chat {{.ExternalID}}</span>
+            <form method="post" action="/agents/discord/unpair" onsubmit="return confirm('Unpair this chat?')" style="display:inline">
+              <input type="hidden" name="bot_id" value="{{.BotID}}">
+              <input type="hidden" name="external_id" value="{{.ExternalID}}">
+              <button class="secondary" style="padding:.15rem .55rem; font-size:.75rem">Unpair</button>
+            </form>
+          </div>
+          {{end}}
+        </div>
+        {{else}}<span class="pill">unpaired</span>{{end}}
+      </td>
+      <td>
+        <details style="display:inline-block; vertical-align:top; margin-left:.4rem">
+          <summary class="secondary" style="cursor:pointer; display:inline-block">Edit</summary>
+          {{$botAgent := .AgentID}}
+          <form method="post" action="/agents/discord/update" style="margin-top:.5rem">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <label>Label</label>
+            <input name="label" value="{{.Label}}" required>
+            <label style="margin-top:.5rem">Bound agent</label>
+            <select name="agent_id">
+              <option value="0"{{if eq $botAgent 0}} selected{{end}}>Active agent (unbound)</option>
+              {{range $.Agents}}<option value="{{.ID}}"{{if eq .ID $botAgent}} selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+            <label style="margin-top:.5rem"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Enabled</label>
+            <label style="margin-top:.5rem">Replace token <span class="muted">(leave blank to keep)</span></label>
+            <input name="token" type="password" autocomplete="off" placeholder="paste a new token to replace">
+            <div style="margin-top:.5rem"><button type="submit">Save</button></div>
+          </form>
+          <form method="post" action="/agents/discord/delete" onsubmit="return confirm('Delete this bot? Its pairings are removed.')" style="margin-top:.5rem">
+            <input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button>
+          </form>
+        </details>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}<p class="muted">No Discord bots yet. Add one below.</p>{{end}}
+
+  {{if .BoxEnabled}}
+  <details style="margin-top:.75rem">
+    <summary><strong>Add a Discord bot</strong></summary>
+    <form method="post" action="/agents/discord/add" style="margin-top:.75rem">
+      <label for="d_label">Label</label>
+      <input id="d_label" name="label" placeholder="Gaming server" autocomplete="off" required>
+      <label for="d_token" style="margin-top:.5rem">Bot token <span class="muted">(developer portal → Bot → Token)</span></label>
+      <input id="d_token" name="token" type="password" autocomplete="off" required>
+      <label for="d_agent" style="margin-top:.5rem">Bind to agent</label>
+      <select id="d_agent" name="agent_id">
+        <option value="0">Active agent (unbound — follows /agent)</option>
+        {{range .Agents}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      <p class="muted" style="margin-top:.5rem">The token is validated with Discord and stored encrypted. Remember to enable the <strong>Message Content intent</strong> on the Bot page, or the bot can't read messages. After adding, DM the bot to get a pairing code.</p>
+      <div style="margin-top:.75rem"><button type="submit">Add bot</button></div>
+    </form>
+  </details>
+  {{end}}
+</div>
+
+<div class="panel">
+  <h2>Pair a chat</h2>
+  <p class="muted">Each bot/app is paired separately. Message it (Telegram: DM the bot; Slack/Discord: DM it, or @mention it in a channel) and it replies with a 6-character code (valid 15 minutes) — the code knows which bot and chat it's for. Enter it here.</p>
   <form method="post" action="/agents/telegram/pair">
     <label for="code">Pairing code</label>
     <input id="code" name="code" placeholder="ABC234" style="max-width:240px; text-transform:uppercase" required>
