@@ -222,16 +222,21 @@ func (m *Manager) SendBot(ctx context.Context, userID, botID int64, text string)
 }
 
 // SendToChat delivers to an explicit bot+chat (a job's chosen destination).
-func (m *Manager) SendToChat(ctx context.Context, userID, botID, chatID int64, text string) error {
+// chatID is the ChannelSender string form; Telegram chat ids are numeric.
+func (m *Manager) SendToChat(ctx context.Context, userID, botID int64, chatID, text string) error {
 	client := m.clientFor(botID)
 	if client == nil {
 		return errNoBot(userID)
+	}
+	cid, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("telegram: bad chat id %q: %w", chatID, err)
 	}
 	format := FormatMarkdown
 	if st, serr := m.db.GetSettings(ctx, userID); serr == nil && st.TgFormat != "" {
 		format = st.TgFormat
 	}
-	return deliver(ctx, client, chatID, text, format, m.log)
+	return deliver(ctx, client, cid, text, format, m.log)
 }
 
 // SendFile uploads a document to the user's primary-bot chat.
@@ -244,20 +249,21 @@ func (m *Manager) SendFile(ctx context.Context, userID int64, name string, data 
 	if err != nil {
 		return fmt.Errorf("telegram: no paired chat for user %d on bot %d: %w", userID, botID, err)
 	}
-	chatID, err := strconv.ParseInt(ident.ChatID, 10, 64)
-	if err != nil {
-		return fmt.Errorf("telegram: bad chat id %q: %w", ident.ChatID, err)
-	}
-	return m.SendFileToChat(ctx, userID, botID, chatID, name, data, caption)
+	return m.SendFileToChat(ctx, userID, botID, ident.ChatID, name, data, caption)
 }
 
-// SendFileToChat uploads a document to an explicit bot+chat.
-func (m *Manager) SendFileToChat(ctx context.Context, userID, botID, chatID int64, name string, data []byte, caption string) error {
+// SendFileToChat uploads a document to an explicit bot+chat. chatID is the
+// ChannelSender string form; Telegram chat ids are numeric.
+func (m *Manager) SendFileToChat(ctx context.Context, userID, botID int64, chatID, name string, data []byte, caption string) error {
 	client := m.clientFor(botID)
 	if client == nil {
 		return errNoBot(userID)
 	}
-	return client.SendDocument(ctx, chatID, name, data, caption)
+	cid, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("telegram: bad chat id %q: %w", chatID, err)
+	}
+	return client.SendDocument(ctx, cid, name, data, caption)
 }
 
 // primaryBot picks the user's primary bot: the first running bot they're paired

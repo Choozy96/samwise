@@ -11,7 +11,7 @@ import (
 // FileSendFunc delivers a file from the user's workspace to the run's origin
 // chat (or the user's default channel / web). Injected by the orchestrator,
 // which owns the workspace path resolution and the channel senders.
-type FileSendFunc func(ctx context.Context, userID, botID, chatID int64, relPath, caption string) error
+type FileSendFunc func(ctx context.Context, userID int64, origin, relPath, caption string) error
 
 var fileSender FileSendFunc
 
@@ -44,7 +44,7 @@ func (h *handlers) sendFile(ctx context.Context, _ *mcp.CallToolRequest, in send
 	if fileSender == nil {
 		return h.fail("send_file", path, "file delivery isn't available on this deployment"), nil, nil
 	}
-	if err := fileSender(ctx, h.userID, h.originBotID, h.originChatID, path, strings.TrimSpace(in.Caption)); err != nil {
+	if err := fileSender(ctx, h.userID, h.origin, path, strings.TrimSpace(in.Caption)); err != nil {
 		return h.fail("send_file", path, err.Error()), nil, nil
 	}
 	h.audit("send_file", "path="+path, "ok")

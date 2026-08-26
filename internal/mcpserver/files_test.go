@@ -33,7 +33,7 @@ func TestSendFileNoExecutor(t *testing.T) {
 // and reports success.
 func TestSendFileWired(t *testing.T) {
 	var gotPath, gotCaption string
-	SetFileSender(func(_ context.Context, _, _, _ int64, p, c string) error {
+	SetFileSender(func(_ context.Context, _ int64, _, p, c string) error {
 		gotPath, gotCaption = p, c
 		return nil
 	})

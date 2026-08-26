@@ -60,8 +60,8 @@ func (h *handlers) resolveDelivery(arg string) string {
 	case "web":
 		return "web"
 	case "here":
-		if h.originChatID != 0 {
-			return fmt.Sprintf("tg:%d:%d", h.originBotID, h.originChatID)
+		if h.origin != "" {
+			return h.origin
 		}
 		return "web" // created from the web portal → "here" means web
 	default:

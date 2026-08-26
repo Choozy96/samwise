@@ -97,7 +97,7 @@ func TestReconcileSkipsStaleOrInvalid(t *testing.T) {
 	_ = os.Remove(link2)
 	_ = os.WriteFile(link2, []byte(`{"token":"stale"}`), 0o600)
 	stale := time.Now().Add(-time.Hour)
-	_ = os.Chtimes(link2, stale, stale)               // the copy is OLD
+	_ = os.Chtimes(link2, stale, stale)                          // the copy is OLD
 	_ = os.WriteFile(cred2, []byte(`{"token":"reauth"}`), 0o640) // canonical just re-authed (now)
 	o2.reconcileClaudeCred(7)
 	if got, _ := os.ReadFile(cred2); string(got) != `{"token":"reauth"}` {

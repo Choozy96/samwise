@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"samwise/internal/orchestrator"
 	"samwise/internal/schedule"
 	"samwise/internal/store"
 )
@@ -58,7 +59,7 @@ func (s *Server) resolveTGChat(r *http.Request, userID int64, chatID string) (st
 	ids, _ := s.db.ListIdentitiesByUser(r.Context(), userID, "telegram")
 	for _, id := range ids {
 		if id.ChatID == chatID {
-			return "tg:" + strconv.FormatInt(id.BotID, 10) + ":" + chatID, true
+			return orchestrator.Address{Channel: "telegram", BotID: id.BotID, ChatID: chatID}.String(), true
 		}
 	}
 	return "", false
@@ -71,23 +72,29 @@ type deliveryTarget struct {
 	Label string
 }
 
-// deliveryTargets lists the user's paired Telegram chats as default-delivery
-// choices for the Settings page. The values double as the allow-list.
+// channelDisplay maps a channel id to its human name for target labels.
+var channelDisplay = map[string]string{"telegram": "Telegram"}
+
+// deliveryTargets lists the user's paired chats across ALL channels as
+// delivery-destination choices. The values (Address strings) double as the
+// allow-list for sanitizeDefaultDelivery.
 func (s *Server) deliveryTargets(r *http.Request, userID int64) []deliveryTarget {
-	ids, _ := s.db.ListIdentitiesByUser(r.Context(), userID, "telegram")
 	var out []deliveryTarget
-	for _, id := range ids {
-		if id.ChatID == "" {
-			continue
+	for _, ch := range orchestrator.KnownChannels {
+		ids, _ := s.db.ListIdentitiesByUser(r.Context(), userID, ch)
+		for _, id := range ids {
+			if id.ChatID == "" {
+				continue
+			}
+			kind := "DM"
+			if strings.HasPrefix(id.ChatID, "-") || strings.HasPrefix(id.ChatID, "C") {
+				kind = "group"
+			}
+			out = append(out, deliveryTarget{
+				Value: orchestrator.Address{Channel: ch, BotID: id.BotID, ChatID: id.ChatID}.String(),
+				Label: channelDisplay[ch] + " " + kind + " (" + id.ChatID + ")",
+			})
 		}
-		label := "Telegram DM (" + id.ChatID + ")"
-		if strings.HasPrefix(id.ChatID, "-") {
-			label = "Telegram group (" + id.ChatID + ")"
-		}
-		out = append(out, deliveryTarget{
-			Value: "tg:" + strconv.FormatInt(id.BotID, 10) + ":" + id.ChatID,
-			Label: label,
-		})
 	}
 	return out
 }
@@ -133,26 +140,13 @@ func (s *Server) parseDeliveryForm(r *http.Request, userID int64) (string, strin
 // splitDelivery breaks a stored delivery value back into the form's select value
 // ("", "web", "tg") and the chat id, for redisplaying an existing job.
 func splitDelivery(stored string) (sel, chat string) {
-	switch {
-	case stored == "web":
+	if stored == "web" {
 		return "web", ""
-	case strings.HasPrefix(stored, "tg:"):
-		if _, c, ok := parseStoredTG(stored); ok {
-			return "tg", c
-		}
-		return "tg", ""
-	default:
-		return "", ""
 	}
-}
-
-// parseStoredTG splits "tg:<botID>:<chatID>" into its parts.
-func parseStoredTG(s string) (bot, chat string, ok bool) {
-	parts := strings.SplitN(s, ":", 3)
-	if len(parts) != 3 || parts[0] != "tg" {
-		return "", "", false
+	if addr, ok := orchestrator.ParseAddress(stored); ok && addr.Channel == "telegram" {
+		return "tg", addr.ChatID
 	}
-	return parts[1], parts[2], true
+	return "", ""
 }
 
 // handleJobs lists the user's scheduled jobs and a creation form.

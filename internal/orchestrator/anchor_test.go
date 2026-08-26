@@ -26,16 +26,16 @@ func (f *fakeSender) SendBot(_ context.Context, userID, botID int64, _ string) e
 	f.calls = append(f.calls, fmt.Sprintf("bot:%d:%d", userID, botID))
 	return nil
 }
-func (f *fakeSender) SendToChat(_ context.Context, userID, botID, chatID int64, _ string) error {
-	f.calls = append(f.calls, fmt.Sprintf("chat:%d:%d:%d", userID, botID, chatID))
+func (f *fakeSender) SendToChat(_ context.Context, userID, botID int64, chatID, _ string) error {
+	f.calls = append(f.calls, fmt.Sprintf("chat:%d:%d:%s", userID, botID, chatID))
 	return nil
 }
 func (f *fakeSender) SendFile(_ context.Context, userID int64, _ string, _ []byte, _ string) error {
 	f.calls = append(f.calls, fmt.Sprintf("file:%d", userID))
 	return nil
 }
-func (f *fakeSender) SendFileToChat(_ context.Context, userID, botID, chatID int64, _ string, _ []byte, _ string) error {
-	f.calls = append(f.calls, fmt.Sprintf("filechat:%d:%d:%d", userID, botID, chatID))
+func (f *fakeSender) SendFileToChat(_ context.Context, userID, botID int64, chatID, _ string, _ []byte, _ string) error {
+	f.calls = append(f.calls, fmt.Sprintf("filechat:%d:%d:%s", userID, botID, chatID))
 	return nil
 }
 
@@ -81,7 +81,7 @@ func TestDeliverRunResultAnchorPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fakeSender{}
-	o.telegram = f
+	o.RegisterSender("telegram", f)
 
 	// 1) Explicit job delivery always wins, anchor or not.
 	_ = o.db.SetSystemSetting(ctx, store.AnchorChatKey, "tg:9:-900")
