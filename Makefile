@@ -6,8 +6,17 @@
 # Docker build context, so the version must be computed here and passed in — the
 # Dockerfile can't derive it itself.
 
-IMAGE   ?= samwise:latest
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+IMAGE    ?= choozy/samwise:latest
+VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
+# The image that ships to the VPS must match the VPS's CPU architecture — a
+# docker image is NOT architecture-neutral: it carries the compiled samwise
+# binary and the claude CLI, both built for one arch. The VPS is x86_64, so
+# builds are pinned to linux/amd64 and stay correct from any build host
+# (an Apple Silicon Mac would otherwise produce an arm64 image that dies on
+# the VPS with "exec format error"). Override for an arm64 host:
+#   make push PLATFORM=linux/arm64
+PLATFORM ?= linux/amd64
 
 .PHONY: version image push compose-build up test
 
@@ -15,9 +24,9 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 version:
 	@echo $(VERSION)
 
-## build the image, version stamped
+## build the image, version stamped, for the deploy target arch
 image:
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) .
+	docker build --platform $(PLATFORM) --build-arg VERSION=$(VERSION) -t $(IMAGE) .
 
 ## build then push to the registry
 push: image

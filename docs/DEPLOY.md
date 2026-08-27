@@ -83,12 +83,23 @@ volume — **your data persists across restarts and rebuilds** (only
    machines makes them rotate each other's OAuth token → recurring `401` on the
    server. (Compose mounts `./secrets/claude` → `/home/app/.claude` read-write so
    the token can refresh.)
-3. Build and start:
+3. Build and start — two equivalent ways. With `make` (stamps the real version
+   from `git describe`, so the footer and the assistant report e.g. `v0.3.7`):
 
    ```sh
-   make up            # = docker compose up -d --build, with the version stamped
-   #   (plain `docker compose up --build -d` also works; it just records the
-   #    version as "docker" instead of the git tag)
+   make up            # = docker compose up -d --build, version-stamped
+   ```
+
+   Or plain compose, no `make` needed — works identically; the version just
+   reads `docker`:
+
+   ```sh
+   docker compose up --build -d
+   ```
+
+   Then either way:
+
+   ```sh
    docker compose logs -f
    curl localhost:8080/healthz      # {"status":"ok"}
    ```
@@ -176,7 +187,7 @@ A fresh GCP instance has none of this yet. SSH in
    `docker-compose.yml` (+ `.env.example`). A shallow clone is easiest:
 
    ```sh
-   git clone --depth 1 https://github.com/YOUR-ORG/samwise.git
+   git clone --depth 1 https://github.com/Choozy96/samwise.git
    cd samwise
    ```
 
@@ -224,20 +235,38 @@ The full image reference is `<registry>/samwise:<tag>`.
 **Docker Hub (simplest):** `<registry>` is just your Docker Hub username, `<tag>`
 is e.g. `latest`. So the reference is `<dockerhub-user>/samwise:latest`:
 
+With `make` (stamps the real version from `git describe`, so the web footer +
+the agent report the right release):
+
 ```sh
-# Local / CI — log in once, then build + push. `make push` stamps the version
-# from `git describe` (so the web footer + the agent report the right release):
 docker login                                              # Docker Hub user + access token
 make push IMAGE=<dockerhub-user>/samwise:latest
 # e.g.  make push IMAGE=janedoe/samwise:latest
-#
-# Without make (or to stamp manually), pass VERSION yourself — otherwise the
-# build records "docker" as the version:
-#   docker build --build-arg VERSION=$(git describe --tags --always --dirty) \
-#     -t <dockerhub-user>/samwise:latest . && docker push <dockerhub-user>/samwise:latest
+```
 
-# On the VPS — set IMAGE in .env to the SAME reference, then:
-#   IMAGE=<dockerhub-user>/samwise:latest
+Or plain docker, no `make` — same image, the reported version just reads
+`docker` (add `--build-arg VERSION=v0.3.7` yourself if you want it stamped):
+
+```sh
+docker login
+docker build --platform linux/amd64 -t <dockerhub-user>/samwise:latest .
+docker push <dockerhub-user>/samwise:latest
+```
+
+> **Build-host architecture matters.** A docker image is **not** architecture-
+> neutral — it carries the compiled `samwise` binary and the `claude` CLI, each
+> built for one CPU architecture. The VPS is **x86_64**, so images must be
+> `linux/amd64`. On an x86_64 build host (Windows/WSL, Intel Mac, Linux PC)
+> that is the default and you can ignore this. On an **Apple Silicon Mac** the
+> default is arm64, and pushing that image breaks production with the very
+> `exec format error` documented below — so pass `--platform linux/amd64`.
+> `make image` / `make push` already pin it (`PLATFORM ?= linux/amd64`); the
+> cross-build runs under emulation, so expect it to be slower than a native one.
+
+Then on the VPS — set `IMAGE` in `.env` to the SAME reference:
+
+```sh
+# IMAGE=<dockerhub-user>/samwise:latest in .env, then:
 docker login                                              # if the repo is private
 docker compose pull
 docker compose up -d --no-build
@@ -253,6 +282,9 @@ gcloud artifacts repositories create <repo> --repository-format=docker --locatio
 gcloud auth configure-docker <region>-docker.pkg.dev
 
 make push IMAGE=<region>-docker.pkg.dev/<project-id>/<repo>/samwise:latest
+# or without make:
+#   docker build --platform linux/amd64 -t <region>-docker.pkg.dev/<project-id>/<repo>/samwise:latest .
+#   docker push  <region>-docker.pkg.dev/<project-id>/<repo>/samwise:latest
 ```
 
 On the VPS, set `IMAGE` to the same reference; the instance's service account
@@ -366,6 +398,64 @@ The portal is **plain HTTP** with logins + personal data. Compose binds it to
 - **Firewall to your IP:** restrict 8080 to your home IP (least good — still plain
   HTTP).
 
+### `exec format error` — claude isn't a valid executable
+
+`headless: start claude: fork/exec /usr/local/bin/claude: exec format error`
+means the claude executable inside the container isn't a real binary. Check
+what it actually is:
+
+```sh
+docker exec samwise-orchestrator-1 sh -c \
+  'f=$(readlink -f /usr/local/bin/claude); ls -la "$f"; head -c 16 "$f" | od -c | head -2'
+```
+
+Three known causes:
+
+- **Broken at BUILD time** (file dated the image build; a few hundred bytes;
+  starts with `echo "Error:` — a shebang-less stub): the `@anthropic-ai/claude-code`
+  npm package ships a **universal error stub** as its `bin` entry; the real
+  executable comes from a per-platform **optionalDependency**
+  (`@anthropic-ai/claude-code-linux-x64` and friends) wired up by its
+  postinstall. In the `node:22-bookworm-slim` base, npm **never installs that
+  optionalDependency at all** — the package's nested `node_modules` comes out
+  empty, and neither `--include=optional` nor running the postinstall by hand
+  changes that (there is nothing for it to find). So **no npm reinstall inside
+  the container recovers**. Hot-patch the running container with the native
+  installer, then copy the binary somewhere the per-user agent uids can read
+  (`/root` is 0700 — a symlink into it breaks isolated runs):
+
+  ```sh
+  docker exec samwise-orchestrator-1 sh -c \
+    'curl -fsSL https://claude.ai/install.sh | bash \
+     && rm -f /usr/local/bin/claude \
+     && cp -L /root/.local/bin/claude /usr/local/bin/claude \
+     && chmod 755 /usr/local/bin/claude && claude --version'
+  ```
+
+  Then **rebuild the image**. The Dockerfile no longer uses npm for the CLI at
+  all: it runs the same native installer, `cp -L`s the binary to
+  `/usr/local/bin/claude`, and verifies `claude --version` at build time, so a
+  broken install fails the build loudly instead of shipping a stub.
+- **Corrupted at RUNTIME** (it worked for days; the file is newer than the
+  image): claude's auto-updater replaced its own binary in-place and the
+  download was interrupted (an OOM kill mid-update does this) or fetched the
+  wrong platform. `docker compose up -d --force-recreate orchestrator` restores
+  the image's install. Images now set `DISABLE_AUTOUPDATER=1` so this can't
+  recur — CLI updates arrive via image rebuilds.
+- **WRONG-ARCH image** (nothing is a stub — every binary is fine, just built
+  for the wrong CPU; `samwise` itself usually fails too, not only `claude`):
+  the image was built on an arm64 host (an Apple Silicon Mac) and the VPS is
+  x86_64. Confirm by comparing the two:
+
+  ```sh
+  docker image inspect $IMAGE --format '{{.Os}}/{{.Architecture}}'   # want linux/amd64
+  uname -m                                                           # on the VPS: x86_64
+  ```
+
+  Rebuild with `--platform linux/amd64` (what `make image` / `make push` do)
+  and push again. See the build-host note under **Build off-box → push → pull**
+  above.
+
 ### claude auth on a headless box — give the VPS its OWN login
 
 > **Do NOT just copy a `.credentials.json` from a machine you actively use with
@@ -382,6 +472,7 @@ it in a browser on **any** machine, approve, and paste the code back. Run it so 
 writes into the mounted credential dir:
 
 ```bash
+# container name = <compose project dir>-orchestrator-1 — check `docker ps`
 docker exec -it samwise-orchestrator-1 \
   env HOME=/home/app CLAUDE_CONFIG_DIR=/home/app/.claude claude
 #   then run  /login  and follow the URL + paste-the-code prompt
@@ -398,30 +489,28 @@ device sessions, some don't — check), use a **separate account dedicated to th
 server**. Copying a credential up from a logged-in machine still works as a quick
 fix, but only if that machine won't be used with Claude afterward.
 
-#### Expect to re-authenticate periodically (suspected ~30-day session limit)
+#### Expect to re-authenticate every ~30 days (confirmed session limit)
 
-Even a correctly set-up, server-dedicated login **eventually expires** and has to
-be re-created with `/login`. The tell-tale error is:
+Even a correctly set-up, server-dedicated login **expires roughly every 30
+days** and has to be re-created with `/login`. The tell-tale error is:
 
 ```
 Failed to authenticate: OAuth session expired and could not be refreshed
 ```
 
-**Suspicion (unconfirmed):** the OAuth session / refresh token has a hard
-lifetime of roughly **30 days**, independent of how often it's used. Evidence so
-far is a single interval:
+The OAuth session / refresh token has a hard lifetime of roughly **30 days**,
+independent of how often it's used. Two consecutive intervals now confirm it:
 
 | Date | Event |
 |---|---|
 | 2026-06-23 | VPS re-authenticated with its own `/login` |
-| 2026-07-23 | All runs failed with `OAuth session expired and could not be refreshed` |
+| 2026-07-23 | All runs failed with `OAuth session expired and could not be refreshed`; re-authenticated same day |
+| 2026-08-23 | Expired again — 31 days of otherwise-healthy operation, no config change, no credential sharing |
 
-That's ~30 days of otherwise-healthy operation, with no config change and no
-credential sharing — which is why a fixed session lifetime is the leading theory
-rather than the rotation/sharing problem. **It is not confirmed.** If this recurs,
-note the date here: a second ~30-day gap would confirm a fixed limit, while a
-markedly different interval would point at something else (revocation, a login
-elsewhere, or an account-level change).
+Treat it as routine maintenance, not an incident: when the error above appears,
+re-run the `/login` flow at the top of this section and restart the
+orchestrator. Expect the next expiry ~30 days after each re-auth (from
+2026-08-23: around 2026-09-22).
 
 **Don't confuse the two auth failures** — they have different causes and fixes:
 

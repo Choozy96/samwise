@@ -142,6 +142,10 @@ func (o *Orchestrator) runIsolation(userID int64) *runtime.RunIsolation {
 	return &runtime.RunIsolation{UID: id, GID: id, Groups: []int{o.cfg.AgentCredGID}}
 }
 
+// MCPStatus reports the in-process core MCP host's address and liveness, for
+// the admin health panel.
+func (o *Orchestrator) MCPStatus() (addr string, alive bool) { return o.mcp.status() }
+
 // Close shuts the core MCP host down.
 func (o *Orchestrator) Close(ctx context.Context) error { return o.mcp.shutdown(ctx) }
 

@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"samwise/internal/store"
 
@@ -152,5 +154,63 @@ func TestMCPHostRejectsBadToken(t *testing.T) {
 		if _, err := dialMCP(t, h.endpoint(), tok); err == nil {
 			t.Errorf("token %q should be rejected", tok)
 		}
+	}
+}
+
+// TestMCPHostSelfHeals: when the listener dies (fd exhaustion, accept errors —
+// the long-running-process failure), ready() rebinds a fresh listener so the
+// NEXT run gets its tools instead of every later run silently losing them.
+func TestMCPHostSelfHeals(t *testing.T) {
+	h, _, _ := newTestHost(t)
+
+	probe := func(addr string) (int, error) {
+		resp, err := http.Post("http://"+addr+"/mcp", "application/json", strings.NewReader("{}"))
+		if err != nil {
+			return 0, err
+		}
+		resp.Body.Close()
+		return resp.StatusCode, nil
+	}
+
+	// Alive: the endpoint answers (400 — no token — but it ANSWERS).
+	addr1, alive := h.status()
+	if !alive {
+		t.Fatal("host should start alive")
+	}
+	if _, err := probe(addr1); err != nil {
+		t.Fatalf("initial probe: %v", err)
+	}
+
+	// Kill the server out from under it (simulates a died listener).
+	_ = h.srv.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, alive := h.status(); !alive {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("host never noticed its listener died")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// ready() must rebind and the new endpoint must answer.
+	if !h.ready() {
+		t.Fatal("ready() should self-heal by rebinding")
+	}
+	addr2, alive := h.status()
+	if !alive {
+		t.Fatal("host should be alive after rebind")
+	}
+	if _, err := probe(addr2); err != nil {
+		t.Fatalf("rebound endpoint not answering: %v", err)
+	}
+
+	// After shutdown, no more rebinding.
+	if err := h.shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if h.ready() {
+		t.Fatal("a shut-down host must not resurrect")
 	}
 }

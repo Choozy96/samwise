@@ -14,12 +14,24 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # ── Runtime stage ─────────────────────────────────────────────────────────
 # Node base so the `claude` CLI (the claude-headless runtime) is available
-# inside the container. Harness auth is provided via a mounted volume, not baked
-# into the image.
+# inside the container. Harness auth is provided via a mounted volume, not
+# baked into the image.
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tini gosu python3 python3-pip python3-venv \
-    && npm install -g @anthropic-ai/claude-code \
+    # Install the claude CLI with the NATIVE installer, not npm. The npm package
+    # only ships a universal error stub as its bin entry; the real binary lives in
+    # a per-platform optionalDependency that npm-in-this-image never installs at
+    # all — which is how a stub reached production ("exec format error"). The
+    # native installer is architecture-aware and needs no npm. `cp -L` (a copy,
+    # never a symlink) is mandatory: /root is 0700, so the per-user agent uids
+    # cannot traverse into it. Then VERIFY, so a broken install fails the build
+    # rather than production:
+    && curl -fsSL https://claude.ai/install.sh | bash \
+    && cp -L /root/.local/bin/claude /usr/local/bin/claude \
+    && chmod 755 /usr/local/bin/claude \
+    && rm -rf /root/.local/share/claude /root/.local/bin/claude /root/.local/state/claude \
+    && claude --version \
     # Python deps for skill scripts (e.g. the migrated calendar/todoist/notion
     # skills). Installed system-wide (--break-system-packages) since the image is
     # a sandbox and skills run with the system python3, not a venv.
@@ -43,7 +55,11 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 ENV APP_ENV=prod \
     HTTP_ADDR=:8080 \
     DB_PATH=/data/app.db \
-    CLAUDE_BIN=claude
+    CLAUDE_BIN=claude \
+    # Never let claude self-update INSIDE the container: an interrupted or
+    # wrong-platform in-place update corrupts its binary ("exec format error")
+    # and survives restarts. Updates arrive via image rebuilds only.
+    DISABLE_AUTOUPDATER=1
 RUN mkdir -p /data && chown app:app /data
 VOLUME ["/data"]
 EXPOSE 8080

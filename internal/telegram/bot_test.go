@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -23,7 +24,7 @@ func TestAddressedInGroup(t *testing.T) {
 		text string
 		want bool
 	}{
-		{"bare command not addressed", &Message{Chat: grp}, "/help", false},          // must mention now
+		{"bare command not addressed", &Message{Chat: grp}, "/help", false},           // must mention now
 		{"command for us (native)", &Message{Chat: grp}, "/help@MyBot", true},         // case-insensitive
 		{"command trailing mention", &Message{Chat: grp}, "/remind 5pm @MyBot", true}, // mention after args
 		{"command leading mention", &Message{Chat: grp}, "@MyBot /remind 5pm", true},  // mention before cmd
@@ -223,5 +224,56 @@ func TestSenderKey(t *testing.T) {
 	}
 	if isGroup(&Chat{Type: "private"}) {
 		t.Error("private should not be a group")
+	}
+}
+
+// TestReplyMediaExtraction verifies the "tagged via a reply" media path with a
+// realistic Telegram update: message 1 carried a photo (no bot mention),
+// message 2 replies to it mentioning the bot. The bot must find the media on
+// the REPLIED-TO message, and none on the reply itself.
+func TestReplyMediaExtraction(t *testing.T) {
+	payload := `{
+		"message_id": 200,
+		"from": {"id": 42, "is_bot": false, "first_name": "Ann"},
+		"chat": {"id": -100555, "type": "supergroup"},
+		"text": "@samwisebot summarize this",
+		"reply_to_message": {
+			"message_id": 199,
+			"from": {"id": 43, "is_bot": false, "first_name": "Ben"},
+			"chat": {"id": -100555, "type": "supergroup"},
+			"caption": "monthly report",
+			"photo": [
+				{"file_id": "small123", "file_size": 1000, "width": 90, "height": 90},
+				{"file_id": "big456", "file_size": 50000, "width": 800, "height": 800}
+			]
+		}
+	}`
+	var msg Message
+	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+		t.Fatal(err)
+	}
+	if msg.ReplyToMessage == nil {
+		t.Fatal("reply_to_message did not unmarshal — reply media can never work")
+	}
+	// The reply itself has no media…
+	if refs := mediaRefs(&msg); len(refs) != 0 {
+		t.Fatalf("reply message should have no media refs, got %+v", refs)
+	}
+	// …the replied-to message has the photo, at the highest resolution.
+	refs := mediaRefs(msg.ReplyToMessage)
+	if len(refs) != 1 || refs[0].fileID != "big456" || refs[0].name != "photo.jpg" {
+		t.Fatalf("parent media not extracted: %+v", refs)
+	}
+
+	// And a replied-to document (the "summarize this PDF" case).
+	payload2 := `{"message_id": 2, "reply_to_message": {"message_id": 1,
+		"document": {"file_id": "doc789", "file_name": "report.pdf", "file_size": 12345}}}`
+	var msg2 Message
+	if err := json.Unmarshal([]byte(payload2), &msg2); err != nil {
+		t.Fatal(err)
+	}
+	refs = mediaRefs(msg2.ReplyToMessage)
+	if len(refs) != 1 || refs[0].fileID != "doc789" || refs[0].name != "report.pdf" {
+		t.Fatalf("parent document not extracted: %+v", refs)
 	}
 }

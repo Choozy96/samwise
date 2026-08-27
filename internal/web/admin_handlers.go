@@ -21,11 +21,17 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.PingContext(r.Context()); err != nil {
 		dbStatus = "error"
 	}
+	mcpAddr, mcpAlive := s.orch.MCPStatus()
+	mcpStatus := "ok (" + mcpAddr + ")"
+	if !mcpAlive {
+		mcpStatus = "DOWN — agent runs have no core tools"
+	}
 	health := map[string]any{
 		"DB":        dbStatus,
 		"DBPath":    s.cfg.DBPath,
 		"UserCount": len(users),
 		"Version":   appVersion,
+		"MCPHost":   mcpStatus,
 	}
 	models, err := s.db.ListModels(r.Context(), false) // all, incl. disabled, for admin
 	if err != nil {

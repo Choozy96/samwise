@@ -24,6 +24,8 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		activeID = active.ID
 	}
 	bots, _ := s.telegramBotViews(r.Context(), u.ID)
+	slackBots := s.slackBotViews(r.Context(), u.ID)
+	discordBots := s.discordBotViews(r.Context(), u.ID)
 	modelOpts := s.orch.ModelChoices(r.Context())
 	// Agents whose model is a raw id outside the catalog (e.g. set via /model
 	// before the model was cataloged): surface it as a "Custom" option so the
@@ -46,6 +48,8 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		"CustomModels": customModels,
 		"Runtimes":     s.orch.RuntimeChoices(),
 		"TgBots":       bots,
+		"SlackBots":    slackBots,
+		"DiscordBots":  discordBots,
 		"BoxEnabled":   s.box.Enabled(),
 	}
 	switch r.URL.Query().Get("msg") {
@@ -75,6 +79,26 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		data["Flash"], data["FlashKind"] = "Telegram rejected that token (getMe failed). Check it with @BotFather.", "error"
 	case "bot_nokey":
 		data["Flash"], data["FlashKind"] = "Set MASTER_KEY in your env file to store bot tokens.", "error"
+	case "slack_added":
+		data["Flash"], data["FlashKind"] = "Slack app added. DM it in Slack to get a pairing code, then pair it below.", "ok"
+	case "slack_saved":
+		data["Flash"], data["FlashKind"] = "Slack app updated.", "ok"
+	case "slack_deleted":
+		data["Flash"], data["FlashKind"] = "Slack app removed.", "ok"
+	case "slack_bad":
+		data["Flash"], data["FlashKind"] = "Provide a label, a bot token (xoxb-…), and an app-level token (xapp-…) — both tokens together.", "error"
+	case "slack_badtoken":
+		data["Flash"], data["FlashKind"] = "Slack rejected that bot token (auth.test failed). Check the app's OAuth tokens.", "error"
+	case "discord_added":
+		data["Flash"], data["FlashKind"] = "Discord bot added. DM it on Discord to get a pairing code, then pair it below.", "ok"
+	case "discord_saved":
+		data["Flash"], data["FlashKind"] = "Discord bot updated.", "ok"
+	case "discord_deleted":
+		data["Flash"], data["FlashKind"] = "Discord bot removed.", "ok"
+	case "discord_bad":
+		data["Flash"], data["FlashKind"] = "Provide a label and a bot token.", "error"
+	case "discord_badtoken":
+		data["Flash"], data["FlashKind"] = "Discord rejected that token. Check it on the app's Bot page in the developer portal.", "error"
 	}
 	s.render(w, r, "agents", data)
 }

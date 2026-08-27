@@ -73,7 +73,7 @@ type deliveryTarget struct {
 }
 
 // channelDisplay maps a channel id to its human name for target labels.
-var channelDisplay = map[string]string{"telegram": "Telegram"}
+var channelDisplay = map[string]string{"telegram": "Telegram", "slack": "Slack", "discord": "Discord"}
 
 // deliveryTargets lists the user's paired chats across ALL channels as
 // delivery-destination choices. The values (Address strings) double as the
